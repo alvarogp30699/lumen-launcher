@@ -10,7 +10,13 @@ import android.widget.LinearLayout
 import android.widget.TextClock
 import android.widget.TextView
 import android.widget.Toast
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+import kotlin.concurrent.thread
+import org.json.JSONObject
 
 /** Pantalla de inicio. Se registra como HOME, así Android la abre sola al encender el stick. */
 class MainActivity : Activity() {
@@ -195,7 +201,7 @@ class MainActivity : Activity() {
             format24Hour = "HH:mm"
             format12Hour = "HH:mm"
             setTextColor(Colors.TEXT)
-            setSizePx(ui, 200)
+            setSizePx(ui, 170)
             typeface = Typeface.DEFAULT_BOLD
         }
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
@@ -224,8 +230,78 @@ class MainActivity : Activity() {
             ).apply { topMargin = ui.px(28) })
         }
 
+        nextF1Row(ui, prefs)?.let {
+            box.addView(it, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = ui.px(24) })
+        }
+
         box.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
         return box
+    }
+
+    private val f1ChannelWords = listOf("f1", "formula 1", "fórmula 1", "formula1", "fórmula1")
+
+    /** Línea "Próximo directo F1" con cuenta atrás (datos de tu PITWALL) y botón para abrir el canal de F1. */
+    private fun nextF1Row(ui: Ui, prefs: Prefs): View? {
+        if (prefs.pitwallUrl.isBlank()) return null
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+        }
+        val label = TextView(this).apply {
+            setTextColor(Colors.TEXT)
+            setSizePx(ui, 28)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 0, ui.px(28), 0)
+        }
+        row.addView(label)
+        thread {
+            try {
+                val u = java.net.URI(prefs.pitwallUrl.trim())
+                val tok = (u.query ?: "").split("&").firstOrNull { it.startsWith("token=") }
+                val url = u.scheme + "://" + u.authority + "/api/standings?series=f1" + (if (tok != null) "&$tok" else "")
+                val next = JSONObject(Xtream.http(url)).optJSONObject("next") ?: return@thread
+                val sessions = next.optJSONArray("sessions") ?: return@thread
+                val parse = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+                val now = System.currentTimeMillis()
+                var text: String? = null
+                for (i in 0 until sessions.length()) {
+                    val so = sessions.getJSONObject(i)
+                    val at = parse.parse(so.optString("at"))?.time ?: continue
+                    if (at + 2 * 3600_000L < now) continue
+                    val mins = (at - now) / 60_000
+                    val cuenta = when {
+                        mins <= 0 -> "¡en directo ahora!"
+                        mins < 60 -> "en $mins min"
+                        mins < 48 * 60 -> "en " + (mins / 60) + " h " + (mins % 60) + " min"
+                        else -> "en " + (mins / 1440) + " días"
+                    }
+                    val day = SimpleDateFormat("EEE HH:mm", Locale("es", "ES")).format(Date(at))
+                    text = "🏁 F1 · " + next.optString("name") + " · " + so.optString("name") + " · " + day + " · " + cuenta
+                    break
+                }
+                if (text == null) return@thread
+                if (prefs.configured && Xtream.channels.isEmpty()) Xtream.load(applicationContext, prefs, false)
+                val f1 = Xtream.channels.firstOrNull { c -> f1ChannelWords.any { c.name.lowercase().contains(it) } }
+                runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    label.text = text
+                    if (f1 != null) {
+                        row.addView(makeButton(this, ui, "▶  Ver " + f1.name, false) {
+                            Xtream.queue = Xtream.channels
+                            startActivity(Intent(this, PlayerActivity::class.java).putExtra("id", f1.id))
+                        })
+                    }
+                    row.visibility = View.VISIBLE
+                }
+            } catch (e: Exception) {
+                // PITWALL apagado o sin red: la línea simplemente no aparece
+            }
+        }
+        return row
     }
 
     private fun isInstalled(pkg: String): Boolean =

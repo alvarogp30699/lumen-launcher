@@ -89,7 +89,7 @@ class SetupServer(
                 if (h.lowercase().startsWith("content-length:")) length = h.substring(15).trim().toIntOrNull() ?: 0
             }
             var body = ""
-            if (length > 0 && length < 20000) {
+            if (length > 0 && length < 400000) {
                 val buf = ByteArray(length)
                 var read = 0
                 while (read < length) {
@@ -114,6 +114,22 @@ class SetupServer(
                 save(form)
                 onSaved()
                 respond(c, 200, page("Guardado. Ya puedes mirar la tele."))
+            } else if (method == "POST" && path == "/restore") {
+                val form = parseForm(body)
+                if (form["k"] != token) {
+                    respond(c, 403, "<p>Código incorrecto. Vuelve a escanear el QR.</p>")
+                    return
+                }
+                val n = prefs.importJson(form["data"] ?: "")
+                Xtream.channels = emptyList()
+                onSaved()
+                respond(c, 200, page(if (n > 0) "Copia restaurada ($n ajustes)." else "Ese archivo no es una copia válida."))
+            } else if (method == "GET" && path == "/backup") {
+                if (query["k"] != token) {
+                    respond(c, 403, "<p>Código incorrecto. Vuelve a escanear el QR.</p>")
+                    return
+                }
+                respond(c, 200, prefs.exportJson(), "application/json; charset=utf-8", "lumen-copia.json")
             } else if (method == "GET" && path == "/") {
                 if (query["k"] != token) {
                     respond(c, 403, "<p>Código incorrecto. Vuelve a escanear el QR.</p>")
@@ -140,6 +156,7 @@ class SetupServer(
         f["pass"]?.let { if (it.isNotBlank()) prefs.pass = it }
         f["repo"]?.let { prefs.updateRepo = it }
         f["pitwall"]?.let { prefs.pitwallUrl = it }
+        f["alerts"]?.let { prefs.pitwallAlerts = (it == "1") }
         f["quality"]?.let { if (it in listOf("auto", "4k", "1080p")) prefs.quality = it }
         f["format"]?.let { if (it in listOf("m3u8", "ts")) prefs.format = it }
         f["sleep"]?.toIntOrNull()?.let { prefs.sleepMinutes = it }
@@ -155,14 +172,15 @@ class SetupServer(
         return "<option value='$v'$sel>$label</option>"
     }
 
-    private fun respond(c: Socket, code: Int, html: String) {
+    private fun respond(c: Socket, code: Int, html: String, type: String = "text/html; charset=utf-8", download: String? = null) {
         val bytes = html.toByteArray(Charsets.UTF_8)
         val status = when (code) {
             200 -> "200 OK"
             403 -> "403 Forbidden"
             else -> "404 Not Found"
         }
-        val head = "HTTP/1.1 $status\r\nContent-Type: text/html; charset=utf-8\r\n" +
+        val head = "HTTP/1.1 $status\r\nContent-Type: $type\r\n" +
+            (if (download != null) "Content-Disposition: attachment; filename=\"$download\"\r\n" else "") +
             "Content-Length: ${bytes.size}\r\nConnection: close\r\n\r\n"
         val out = c.getOutputStream()
         out.write(head.toByteArray(Charsets.UTF_8))
@@ -204,9 +222,23 @@ $note
 <select name="sleep">$sleepOptions</select>
 <label>PITWALL <small>(dirección de tu PC, p. ej. http://192.168.1.50:3000)</small></label>
 <input name="pitwall" value="${esc(prefs.pitwallUrl)}" autocapitalize="off" autocomplete="off">
+<label>Avisos de F1 sobre el vídeo <small>(bandera amarilla, safety car… con tu retraso)</small></label>
+<select name="alerts">${opt("1", if (prefs.pitwallAlerts) "1" else "0", "Activados")}${opt("0", if (prefs.pitwallAlerts) "1" else "0", "Desactivados")}</select>
 <label>Repositorio de actualizaciones <small>(usuario/repositorio de GitHub)</small></label>
 <input name="repo" value="${esc(prefs.updateRepo)}" autocapitalize="off" autocomplete="off">
 <button type="submit">Guardar</button>
-</form></body></html>"""
+</form>
+<h2 style="margin-top:40px;font-size:20px">Copia de seguridad</h2>
+<p><small>Guarda favoritos, retrasos por canal, apps ocultas y la configuración (incluida la contraseña de la lista: guárdala en un sitio privado).</small></p>
+<a href="/backup?k=$token" style="display:block;text-align:center;padding:16px;border-radius:14px;background:#1D2330;color:#F3F4F7;text-decoration:none;font-weight:700">Descargar copia</a>
+<form method="post" action="/restore" id="rf">
+<input type="hidden" name="k" value="$token"><input type="hidden" name="data" id="rd">
+<label>Restaurar desde un archivo de copia</label>
+<input type="file" id="rfile" accept=".json,application/json">
+</form>
+<script>
+document.getElementById('rfile').addEventListener('change',function(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(){document.getElementById('rd').value=r.result;document.getElementById('rf').submit();};r.readAsText(f);});
+</script>
+</body></html>"""
     }
 }

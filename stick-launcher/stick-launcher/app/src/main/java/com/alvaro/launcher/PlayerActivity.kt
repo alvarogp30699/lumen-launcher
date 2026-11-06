@@ -14,6 +14,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.JavascriptInterface
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -49,6 +50,9 @@ class PlayerActivity : Activity() {
     private var pwAdjust = false
     private var pwDelay = 10
     private var pwSeries: String? = null
+    private lateinit var pwAlert: TextView
+    private var prevIndex = -1
+    private var playedOnce = false
 
     private var player: ExoPlayer? = null
     private var queue: List<Channel> = emptyList()
@@ -89,6 +93,23 @@ class PlayerActivity : Activity() {
             gravity = Gravity.TOP or Gravity.END
             rightMargin = ui.px(72)
             topMargin = ui.px(56)
+        })
+        pwAlert = TextView(this).apply {
+            setTextColor(Color.parseColor("#1A1203"))
+            setSizePx(ui, 34)
+            typeface = Typeface.DEFAULT_BOLD
+            maxWidth = ui.px(760)
+            setPadding(ui.px(30), ui.px(22), ui.px(30), ui.px(22))
+            background = GradientDrawable().apply {
+                cornerRadius = ui.px(22).toFloat()
+                setColor(Color.parseColor("#FFD400"))
+            }
+            visibility = View.GONE
+        }
+        root.addView(pwAlert, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.TOP or Gravity.END
+            rightMargin = ui.px(72)
+            topMargin = ui.px(120)
         })
         setContentView(root)
 
@@ -215,6 +236,8 @@ class PlayerActivity : Activity() {
 
     private fun play(i: Int) {
         val p = player ?: return
+        if (playedOnce && i != index) prevIndex = index
+        playedOnce = true
         index = i
         val ch = queue[i]
         retries = 0
@@ -223,10 +246,18 @@ class PlayerActivity : Activity() {
         p.playWhenReady = true
         prefs.lastChannelId = ch.id
         prefs.lastChannelName = ch.name
-        closePanel()
-        detectSeries(ch.name, ch.cat)
         pwDelay = prefs.pitwallDelay(ch.id)
+        hidePanel()
+        detectSeries(ch.name, ch.cat)
         showInfo(ch)
+    }
+
+    private fun previousChannel() {
+        if (prevIndex in queue.indices && prevIndex != index) {
+            play(prevIndex)
+        } else {
+            Toast.makeText(this, "Todavía no has cambiado de canal", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun zap(delta: Int) {
@@ -274,6 +305,10 @@ class PlayerActivity : Activity() {
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (pwOpen) return panelKey(keyCode)
         when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_LAST_CHANNEL -> {
+                previousChannel()
+                return true
+            }
             KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_PROG_YELLOW, KeyEvent.KEYCODE_INFO -> {
                 if (prefs.pitwallUrl.isNotBlank()) {
                     openPanel()
@@ -300,23 +335,18 @@ class PlayerActivity : Activity() {
 
     // ───────────────────────── PITWALL ─────────────────────────
 
-    private val f1Words = listOf("formula 1", "fórmula 1", "formula1", "fórmula1", "f1 ", " f1", "gran premio", "gp de", "grand prix")
-    private val motoWords = listOf("motogp", "moto gp", "moto2", "moto3", "gran premio de", "mundial de motociclismo")
-    private val sessionWords = listOf("carrera", "clasificación", "clasificacion", "libres", "sprint", "qualifying", "race", "practice", "warm up", "warm-up")
+    private val f1Words = listOf("formula 1", "fórmula 1", "formula1", "fórmula1", "f1 ", " f1", "grand prix", "gran premio de f", "gran premio de f1")
+    private val sessionWords = listOf("carrera", "clasificación", "clasificacion", "libres", "sprint", "qualifying", "race", "practice")
 
-    /** Detecta automáticamente si se está viendo F1 o MotoGP por el nombre del canal, la categoría o el título del programa. */
+    /** Detecta si se está viendo F1 por el nombre del canal, la categoría o el título del programa (MotoGP se ignora). */
     private fun detectSeries(name: String, cat: String, epgTitle: String = "") {
         val t = " " + (name + " " + cat + " " + epgTitle).lowercase() + " "
-        val isMoto = motoWords.any { t.contains(it) } && !t.contains("formula") && !t.contains("fórmula")
-        val isF1 = f1Words.any { t.contains(it) } || (name.lowercase().contains("f1"))
-        val series = when {
-            isMoto && !t.contains(" f1") -> "motogp"
-            isF1 -> "f1"
-            else -> null
-        }
-        val live = epgTitle.isEmpty() || sessionWords.any { t.contains(it) } || series != null
-        pwSeries = if (live) series else null
+        val moto = t.contains("motogp") || t.contains("moto gp") || t.contains("moto2") || t.contains("moto3")
+        val isF1 = !moto && (f1Words.any { t.contains(it) } || name.lowercase().contains("f1"))
+        val live = epgTitle.isEmpty() || sessionWords.any { t.contains(it) } || isF1
+        pwSeries = if (isF1 && live) "f1" else null
         updateHint()
+        syncPanel()
     }
 
     private fun updateHint() {
@@ -331,40 +361,91 @@ class PlayerActivity : Activity() {
     private fun panelUrl(): String {
         val base = prefs.pitwallUrl.trim()
         val sep = if (base.contains("?")) "&" else "?"
-        val series = pwSeries ?: "f1"
-        return base + sep + "panel=1&mode=live&series=" + series + "&delay=" + pwDelay + "&zoom=1.25"
+        return base + sep + "panel=1&mode=live&series=f1&delay=" + pwDelay + "&zoom=1.25"
     }
 
-    @android.annotation.SuppressLint("SetJavaScriptEnabled")
-    private fun openPanel() {
+    /** Puente JavaScript: PITWALL avisa aquí (ya con el retraso aplicado) de banderas, safety car, etc. */
+    private inner class Bridge {
+        @JavascriptInterface
+        fun alert(type: String, text: String) {
+            runOnUiThread { showAlert(text) }
+        }
+    }
+
+    private fun showAlert(text: String) {
+        if (!prefs.pitwallAlerts || pwOpen || text.isBlank()) return
+        pwAlert.text = text
+        pwAlert.visibility = View.VISIBLE
+        pwAlert.bringToFront()
+        handler.removeCallbacks(hideAlert)
+        handler.postDelayed(hideAlert, 7000)
+    }
+
+    private val hideAlert = Runnable { pwAlert.visibility = View.GONE }
+
+    /** Mantiene el panel cargado (invisible) mientras se ve F1, para recibir avisos aunque esté cerrado. */
+    private fun syncPanel() {
+        if (prefs.pitwallUrl.isBlank() || pwSeries == null) {
+            destroyPanel()
+            return
+        }
+        if (pwView == null) createPanel() else js("pwPanel.setDelay($pwDelay)")
+    }
+
+    @android.annotation.SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
+    private fun createPanel() {
         val root = playerView.parent as FrameLayout
         val w = WebView(this)
         w.setBackgroundColor(Color.TRANSPARENT)
         w.isFocusable = false
         w.isFocusableInTouchMode = false
+        w.alpha = 0f
         w.settings.javaScriptEnabled = true
         w.settings.domStorageEnabled = true
         w.settings.cacheMode = WebSettings.LOAD_NO_CACHE
-        w.settings.mediaPlaybackRequiresUserGesture = true
+        w.addJavascriptInterface(Bridge(), "PWBridge")
         w.webViewClient = object : WebViewClient() {
             override fun onReceivedError(v: WebView, errorCode: Int, description: String?, failingUrl: String?) {
-                Toast.makeText(this@PlayerActivity, "No se alcanza PITWALL. ¿Está encendido el PC y es correcta la dirección?", Toast.LENGTH_LONG).show()
+                if (pwOpen) {
+                    Toast.makeText(this@PlayerActivity, "No se alcanza PITWALL. ¿Está encendido el PC y es correcta la dirección?", Toast.LENGTH_LONG).show()
+                }
             }
         }
         val width = (resources.displayMetrics.widthPixels * 0.35f).toInt()
         root.addView(w, FrameLayout.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT).apply { gravity = Gravity.END })
+        pwAlert.bringToFront()
+        pwHint.bringToFront()
         w.loadUrl(panelUrl())
         pwView = w
+    }
+
+    private fun openPanel() {
+        if (pwView == null) createPanel()
+        pwView?.alpha = 1f
         pwOpen = true
         pwAdjust = false
         pwHint.visibility = View.GONE
+        pwAlert.visibility = View.GONE
         overlay.visibility = View.GONE
     }
 
-    private fun closePanel() {
-        val w = pwView ?: run { pwOpen = false; return }
-        (w.parent as? ViewGroup)?.removeView(w)
-        w.destroy()
+    /** Oculta el panel (sigue cargado en segundo plano para los avisos). */
+    private fun hidePanel() {
+        if (pwOpen || pwAdjust) js("pwPanel.adjust(false)")
+        pwOpen = false
+        pwAdjust = false
+        pwView?.alpha = 0f
+        updateHint()
+    }
+
+    private fun closePanel() = hidePanel()
+
+    private fun destroyPanel() {
+        val w = pwView
+        if (w != null) {
+            (w.parent as? ViewGroup)?.removeView(w)
+            w.destroy()
+        }
         pwView = null
         pwOpen = false
         pwAdjust = false
@@ -375,7 +456,10 @@ class PlayerActivity : Activity() {
         pwView?.evaluateJavascript(code) { r -> cb?.invoke(r ?: "") }
     }
 
-    /** Teclas con el panel abierto: ◀▶ cambia de vista, ▲▼ desplaza, OK entra/sale del ajuste de retraso, Atrás cierra. */
+    /**
+     * Teclas con el panel abierto: ◀▶ vista, ▲▼ desplazar, OK ajusta el retraso, Atrás cierra.
+     * En el ajuste: ◀▶ ±1 s, ▲▼ ±5 s, MENU sincroniza con el último evento (púlsalo justo cuando lo veas en la tele).
+     */
     private fun panelKey(keyCode: Int): Boolean {
         val chId = queue.getOrNull(index)?.id ?: -1
         if (pwAdjust) {
@@ -391,6 +475,19 @@ class PlayerActivity : Activity() {
                     r.trim().toDoubleOrNull()?.let {
                         pwDelay = it.toInt()
                         prefs.setPitwallDelay(chId, pwDelay)
+                    }
+                }
+                return true
+            }
+            if (keyCode == KeyEvent.KEYCODE_MENU || keyCode == KeyEvent.KEYCODE_PROG_BLUE) {
+                js("pwPanel.sync()") { r ->
+                    val v = r.trim().toDoubleOrNull() ?: -1.0
+                    if (v < 0) {
+                        Toast.makeText(this, "No hay ningún evento reciente (bandera, safety car…). Prueba cuando ocurra uno.", Toast.LENGTH_LONG).show()
+                    } else {
+                        pwDelay = v.toInt()
+                        prefs.setPitwallDelay(chId, pwDelay)
+                        Toast.makeText(this, "Retraso sincronizado: " + pwDelay + " s", Toast.LENGTH_SHORT).show()
                     }
                 }
                 return true
@@ -411,7 +508,7 @@ class PlayerActivity : Activity() {
                 pwAdjust = true
                 js("pwPanel.adjust(true)")
             }
-            KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_PROG_YELLOW, KeyEvent.KEYCODE_INFO -> closePanel()
+            KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_PROG_YELLOW, KeyEvent.KEYCODE_INFO -> hidePanel()
             else -> return true
         }
         return true
@@ -424,7 +521,7 @@ class PlayerActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
-        closePanel()
+        destroyPanel()
         playerView.player = null
         player?.release()
         player = null

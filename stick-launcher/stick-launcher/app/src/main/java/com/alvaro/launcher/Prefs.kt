@@ -1,6 +1,8 @@
 package com.alvaro.launcher
 
 import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
 
 /** Ajustes guardados en el propio stick. No hay ninguna lista ni credencial incluida en la app. */
 class Prefs(ctx: Context) {
@@ -76,6 +78,55 @@ class Prefs(ctx: Context) {
         sp.edit().putInt("pwd_$channelId", sec).putInt("pwd_last", sec).apply()
     }
 
+    /** Avisos de F1 (bandera amarilla, safety car…) sobre el vídeo, con el retraso aplicado */
+    var pitwallAlerts: Boolean
+        get() = sp.getBoolean("pwAlerts", true)
+        set(v) {
+            sp.edit().putBoolean("pwAlerts", v).apply()
+        }
+
+    /** Copia de seguridad de todos los ajustes (JSON). Incluye la contraseña de la lista: guárdala en un sitio privado. */
+    fun exportJson(): String {
+        val o = JSONObject()
+        for ((k, v) in sp.all) {
+            if (k in SKIP) continue
+            when (v) {
+                is String -> o.put(k, JSONArray().put("s").put(v))
+                is Int -> o.put(k, JSONArray().put("i").put(v))
+                is Long -> o.put(k, JSONArray().put("l").put(v))
+                is Boolean -> o.put(k, JSONArray().put("b").put(v))
+            }
+        }
+        return o.toString(2)
+    }
+
+    /** Restaura una copia. Devuelve el número de ajustes recuperados (0 si el archivo no sirve). */
+    fun importJson(text: String): Int {
+        return try {
+            val o = JSONObject(text)
+            val ed = sp.edit()
+            var n = 0
+            val keys = o.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                if (k in SKIP) continue
+                val a = o.optJSONArray(k) ?: continue
+                when (a.optString(0)) {
+                    "s" -> ed.putString(k, a.optString(1))
+                    "i" -> ed.putInt(k, a.optInt(1))
+                    "l" -> ed.putLong(k, a.optLong(1))
+                    "b" -> ed.putBoolean(k, a.optBoolean(1))
+                    else -> continue
+                }
+                n++
+            }
+            ed.apply()
+            n
+        } catch (e: Exception) {
+            0
+        }
+    }
+
     val configured: Boolean
         get() = server.isNotBlank() && user.isNotBlank() && pass.isNotBlank()
 
@@ -92,6 +143,7 @@ class Prefs(ctx: Context) {
         set(v) = put("hidden", v.joinToString(","))
 
     companion object {
+        private val SKIP = setOf("latestCode", "lastCheck")
         val DEFAULT_PINS = listOf(
             "com.teamsmart.videomanager.tv",
             "com.dazn",

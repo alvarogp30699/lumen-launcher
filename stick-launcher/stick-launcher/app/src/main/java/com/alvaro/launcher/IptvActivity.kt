@@ -2,7 +2,10 @@ package com.alvaro.launcher
 
 import android.app.Activity
 import android.content.Context
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.speech.RecognizerIntent
+import java.text.Normalizer
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -73,6 +76,8 @@ class IptvActivity : Activity() {
     companion object {
         const val FAV = "__fav"
         const val ALL = "__all"
+        const val SEARCH = "__search"
+        private const val REQ_VOICE = 41
     }
 
     private lateinit var ui: Ui
@@ -179,10 +184,17 @@ class IptvActivity : Activity() {
             setSizePx(ui, 24)
         }
         val refresh = makeButton(this, ui, "Actualizar lista", false) { loadData(true) }
+        val voice = makeButton(this, ui, "🎤 Buscar", false) { startVoice() }
+        val guide = makeButton(this, ui, "Guía", false) {
+            Xtream.queue = current
+            startActivity(Intent(this, GuideActivity::class.java))
+        }
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(statusView, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(voice, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { rightMargin = ui.px(16) })
+            addView(guide, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { rightMargin = ui.px(16) })
             addView(refresh)
         }
 
@@ -363,6 +375,48 @@ class IptvActivity : Activity() {
             statusView.text = current.size.toString() + " canales"
         }
         showEpg(current.firstOrNull())
+    }
+
+    private fun startVoice() {
+        val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-ES")
+            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Di el nombre del canal")
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(i, REQ_VOICE)
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(this, "Este stick no tiene reconocimiento de voz. Instala la app de Google o usa un mando con micrófono.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_VOICE || resultCode != RESULT_OK) return
+        val text = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull() ?: return
+        search(text)
+    }
+
+    private fun norm(s: String): String =
+        Normalizer.normalize(s.lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+
+    private fun search(q: String) {
+        val words = norm(q).split(" ").filter { it.isNotBlank() }
+        if (words.isEmpty() || Xtream.channels.isEmpty()) return
+        val found = Xtream.channels.filter { c ->
+            val n = norm(c.name)
+            words.all { n.contains(it) }
+        }
+        catId = SEARCH
+        current = found
+        adapter.items = found
+        adapter.notifyDataSetChanged()
+        styleCategories()
+        statusView.text = if (found.isEmpty()) "Sin resultados para «$q»" else found.size.toString() + " resultados para «" + q + "»"
+        grid.setSelection(0)
+        if (found.isNotEmpty()) grid.requestFocus()
+        showEpg(found.firstOrNull())
     }
 
     private fun openChannel(pos: Int) {
