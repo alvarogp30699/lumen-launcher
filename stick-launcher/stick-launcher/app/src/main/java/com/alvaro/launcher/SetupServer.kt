@@ -139,6 +139,7 @@ class SetupServer(
         f["user"]?.let { if (it.isNotBlank()) prefs.user = it }
         f["pass"]?.let { if (it.isNotBlank()) prefs.pass = it }
         f["repo"]?.let { prefs.updateRepo = it }
+        f["pitwall"]?.let { prefs.pitwallUrl = it }
         f["quality"]?.let { if (it in listOf("auto", "4k", "1080p")) prefs.quality = it }
         f["format"]?.let { if (it in listOf("m3u8", "ts")) prefs.format = it }
         f["sleep"]?.toIntOrNull()?.let { prefs.sleepMinutes = it }
@@ -201,6 +202,8 @@ $note
 <select name="format">${opt("m3u8", prefs.format, "m3u8 (HLS)")}${opt("ts", prefs.format, "ts")}</select>
 <label>Temporizador de reproducción</label>
 <select name="sleep">$sleepOptions</select>
+<label>PITWALL <small>(dirección de tu PC, p. ej. http://192.168.1.50:3000)</small></label>
+<input name="pitwall" value="${esc(prefs.pitwallUrl)}" autocapitalize="off" autocomplete="off">
 <label>Repositorio de actualizaciones <small>(usuario/repositorio de GitHub)</small></label>
 <input name="repo" value="${esc(prefs.updateRepo)}" autocapitalize="off" autocomplete="off">
 <button type="submit">Guardar</button>

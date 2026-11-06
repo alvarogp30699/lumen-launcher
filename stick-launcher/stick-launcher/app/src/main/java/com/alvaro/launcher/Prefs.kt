@@ -64,6 +64,18 @@ class Prefs(ctx: Context) {
             sp.edit().putLong("lastCheck", v).apply()
         }
 
+    /** Dirección de PITWALL en tu PC, p. ej. http://192.168.1.50:3000 (con ?token=... si usas contraseña) */
+    var pitwallUrl: String
+        get() = str("pitwall")
+        set(v) = put("pitwall", v.trim())
+
+    /** Retraso anti-spoiler (segundos) recordado por canal */
+    fun pitwallDelay(channelId: Int): Int = sp.getInt("pwd_$channelId", sp.getInt("pwd_last", 10))
+
+    fun setPitwallDelay(channelId: Int, sec: Int) {
+        sp.edit().putInt("pwd_$channelId", sec).putInt("pwd_last", sec).apply()
+    }
+
     val configured: Boolean
         get() = server.isNotBlank() && user.isNotBlank() && pass.isNotBlank()
 
