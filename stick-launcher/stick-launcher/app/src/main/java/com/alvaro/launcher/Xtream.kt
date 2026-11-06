@@ -11,7 +11,7 @@ import java.net.URL
 import java.net.URLEncoder
 
 data class Category(val id: String, val name: String)
-data class Channel(val id: Int, val num: Int, val name: String, val cat: String)
+data class Channel(val id: Int, val num: Int, val name: String, val cat: String, val key: String = normText(name))
 data class Epg(val title: String, val start: Long, val end: Long)
 
 /** Cliente mínimo de la API Xtream Codes (canales en directo y guía corta). */

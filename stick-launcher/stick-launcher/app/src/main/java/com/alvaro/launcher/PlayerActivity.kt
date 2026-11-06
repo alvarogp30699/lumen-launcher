@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.TextUtils
+import android.media.AudioManager
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -26,6 +27,8 @@ import android.widget.Toast
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import kotlin.concurrent.thread
@@ -51,6 +54,9 @@ class PlayerActivity : Activity() {
     private var pwDelay = 10
     private var pwSeries: String? = null
     private lateinit var pwAlert: TextView
+    private var remote: RemoteServer? = null
+    private var autoOpenedFor = ""
+    private var summaryFor = ""
     private var prevIndex = -1
     private var playedOnce = false
 
@@ -92,6 +98,21 @@ class PlayerActivity : Activity() {
         root.addView(pwHint, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             gravity = Gravity.TOP or Gravity.END
             rightMargin = ui.px(72)
+            topMargin = ui.px(56)
+        })
+        reconn = TextView(this).apply {
+            setTextColor(Colors.TEXT)
+            setSizePx(ui, 30)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(ui.px(28), ui.px(14), ui.px(28), ui.px(14))
+            background = GradientDrawable().apply {
+                cornerRadius = ui.px(18).toFloat()
+                setColor(Color.argb(217, 11, 13, 18))
+            }
+            visibility = View.GONE
+        }
+        root.addView(reconn, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             topMargin = ui.px(56)
         })
         pwAlert = TextView(this).apply {
@@ -183,8 +204,15 @@ class PlayerActivity : Activity() {
         return box
     }
 
+    /** Canales por los que se puede hacer zapping: sin ocultos ni bloqueados (el pedido sí se incluye si no está bloqueado). */
+    private fun playable(wantedId: Int): List<Channel> {
+        val visible = prefs.visibleChannels(Xtream.channels)
+        val wanted = Xtream.channels.firstOrNull { it.id == wantedId }
+        return if (wanted != null && visible.none { it.id == wantedId } && wanted.cat !in prefs.lockedCats) listOf(wanted) + visible else visible
+    }
+
     private fun start(wantedId: Int) {
-        val all = Xtream.channels
+        val all = playable(wantedId)
         var q = Xtream.queue
         if (q.none { it.id == wantedId }) q = all
         if (q.isEmpty()) {
@@ -196,42 +224,72 @@ class PlayerActivity : Activity() {
         index = q.indexOfFirst { it.id == wantedId }.coerceAtLeast(0)
         createPlayer()
         play(index)
-        if (prefs.sleepMinutes > 0) {
-            handler.postDelayed({
-                Toast.makeText(this, "Temporizador: reproducción detenida", Toast.LENGTH_LONG).show()
-                finish()
-            }, prefs.sleepMinutes * 60_000L)
+        if (remote == null) {
+            remote = RemoteServer(prefs.remoteToken, { cmd -> runOnUiThread { remoteCmd(cmd) } }, { q -> remoteSearch(q) }, { remoteState() })
+            remote?.start()
         }
+        setSleep(prefs.sleepMinutes, false)
+    }
+
+    private lateinit var reconn: TextView
+    private val stallCheck = Runnable {
+        // más de 20 s cargando sin imagen: se vuelve a pedir el canal
+        if (player?.playbackState == Player.STATE_BUFFERING) reconnect("sin datos")
     }
 
     private fun createPlayer() {
-        val p = ExoPlayer.Builder(this).build()
+        // Búfer corto para directos: cambia de canal rápido y no gasta memoria de más
+        val lc = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(8000, 30000, 1500, 3000)
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+        val rf = DefaultRenderersFactory(this).setEnableDecoderFallback(true)
+        val p = ExoPlayer.Builder(this, rf).setLoadControl(lc).build()
         var params = p.trackSelectionParameters.buildUpon()
         if (prefs.quality == "1080p") params = params.setMaxVideoSize(1920, 1080)
         if (prefs.quality == "4k") params = params.setForceHighestSupportedBitrate(true)
         p.trackSelectionParameters = params.build()
         p.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_READY) retries = 0
+                handler.removeCallbacks(stallCheck)
+                if (playbackState == Player.STATE_READY) {
+                    retries = 0
+                    reconn.visibility = View.GONE
+                } else if (playbackState == Player.STATE_BUFFERING) {
+                    handler.postDelayed(stallCheck, 20_000)
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                retries++
-                if (retries <= 3) {
-                    handler.postDelayed({
-                        player?.prepare()
-                    }, 2000)
-                } else {
-                    Toast.makeText(
-                        this@PlayerActivity,
-                        "No se puede reproducir este canal. Prueba otro con ▲▼ o cambia el formato en Ajustes.",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
+                ErrorLog.add(this@PlayerActivity, "Reproductor · " + (queue.getOrNull(index)?.name ?: "?") + " · " + error.errorCodeName + " · " + (error.message ?: ""))
+                reconnect(error.errorCodeName)
             }
         })
         playerView.player = p
         player = p
+    }
+
+    /** Reintenta solo, esperando cada vez un poco más (hasta 8 veces) y avisando en pantalla. */
+    private fun reconnect(reason: String) {
+        retries++
+        if (retries > 8) {
+            reconn.visibility = View.GONE
+            Toast.makeText(
+                this,
+                "No se puede reproducir este canal ($reason). Prueba otro con ▲▼ o cambia el formato en Ajustes.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        reconn.text = "⟳  Reconectando…  ($retries/8)"
+        reconn.visibility = View.VISIBLE
+        handler.postDelayed({
+            val ch = queue.getOrNull(index) ?: return@postDelayed
+            val p = player ?: return@postDelayed
+            p.setMediaItem(MediaItem.fromUri(Xtream.streamUrl(prefs, ch.id)))
+            p.prepare()
+            p.playWhenReady = true
+        }, minOf(1500L * retries, 8000L))
     }
 
     private fun play(i: Int) {
@@ -241,6 +299,7 @@ class PlayerActivity : Activity() {
         index = i
         val ch = queue[i]
         retries = 0
+        reconn.visibility = View.GONE
         p.setMediaItem(MediaItem.fromUri(Xtream.streamUrl(prefs, ch.id)))
         p.prepare()
         p.playWhenReady = true
@@ -250,6 +309,41 @@ class PlayerActivity : Activity() {
         hidePanel()
         detectSeries(ch.name, ch.cat)
         showInfo(ch)
+    }
+
+    private var sleepRun: Runnable? = null
+    private var sleepAt = 0L
+
+    /** Programa (o cancela con 0) el apagado automático de la reproducción. */
+    private fun setSleep(min: Int, announce: Boolean) {
+        sleepRun?.let { handler.removeCallbacks(it) }
+        sleepRun = null
+        sleepAt = 0L
+        if (min > 0) {
+            val r = Runnable {
+                Toast.makeText(this, "Temporizador: reproducción detenida", Toast.LENGTH_LONG).show()
+                finish()
+            }
+            sleepRun = r
+            sleepAt = System.currentTimeMillis() + min * 60_000L
+            handler.postDelayed(r, min * 60_000L)
+        }
+        if (announce) {
+            Toast.makeText(this, if (min > 0) "Se apagará en $min min" else "Temporizador desactivado", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** Cada pulsación pasa a 30, 60, 90 min y vuelve a desactivado. */
+    private fun cycleSleep() {
+        val opts = listOf(0, 30, 60, 90)
+        val left = if (sleepAt > 0) ((sleepAt - System.currentTimeMillis()) / 60_000L).toInt() + 1 else 0
+        val cur = when {
+            left <= 0 -> 0
+            left <= 30 -> 30
+            left <= 60 -> 60
+            else -> 90
+        }
+        setSleep(opts[(opts.indexOf(cur) + 1) % opts.size], true)
     }
 
     private fun previousChannel() {
@@ -303,8 +397,13 @@ class PlayerActivity : Activity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (pwOpen) return panelKey(keyCode)
+        val isVolume = keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_MUTE
+        if (pwOpen && !isVolume) return panelKey(keyCode)
         when (keyCode) {
+            KeyEvent.KEYCODE_PROG_RED -> {
+                cycleSleep()
+                return true
+            }
             KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_LAST_CHANNEL -> {
                 previousChannel()
                 return true
@@ -361,14 +460,38 @@ class PlayerActivity : Activity() {
     private fun panelUrl(): String {
         val base = prefs.pitwallUrl.trim()
         val sep = if (base.contains("?")) "&" else "?"
-        return base + sep + "panel=1&mode=live&series=f1&delay=" + pwDelay + "&zoom=1.25"
+        return base + sep + "panel=1&mode=live&series=f1&delay=" + pwDelay + "&zoom=1.25&hidden=1&fine=1&favs=" + java.net.URLEncoder.encode(prefs.pitwallFavs, "UTF-8")
     }
 
     /** Puente JavaScript: PITWALL avisa aquí (ya con el retraso aplicado) de banderas, safety car, etc. */
     private inner class Bridge {
+        /** PITWALL avisa del estado de la sesión: "on" al empezar, "off" al terminar (con el retraso aplicado) */
+        @JavascriptInterface
+        fun session(state: String, title: String) {
+            runOnUiThread { onSession(state, title) }
+        }
+
         @JavascriptInterface
         fun alert(type: String, text: String) {
             runOnUiThread { showAlert(text) }
+        }
+    }
+
+    private fun onSession(state: String, title: String) {
+        if (!prefs.pitwallAuto) return
+        if (state == "on" && autoOpenedFor != title) {
+            autoOpenedFor = title
+            openPanel()
+        } else if (state == "off") {
+            val race = title.contains("carrera", true) || title.contains("race", true) || title.contains("sprint", true)
+            if (race && summaryFor != title) {
+                // al terminar la carrera se abre solo el resumen (podio, vueltas rápidas…)
+                summaryFor = title
+                openPanel()
+                js("pwPanel.show('sum')")
+            } else if (pwOpen && autoOpenedFor == title) {
+                hidePanel()
+            }
         }
     }
 
@@ -405,6 +528,11 @@ class PlayerActivity : Activity() {
         w.settings.cacheMode = WebSettings.LOAD_NO_CACHE
         w.addJavascriptInterface(Bridge(), "PWBridge")
         w.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView, url: String?) {
+                // si el panel se abrió antes de terminar de cargar, se activa el dibujado ahora
+                if (pwOpen) view.evaluateJavascript("pwPanel.hidden(false)", null)
+            }
+
             override fun onReceivedError(v: WebView, errorCode: Int, description: String?, failingUrl: String?) {
                 if (pwOpen) {
                     Toast.makeText(this@PlayerActivity, "No se alcanza PITWALL. ¿Está encendido el PC y es correcta la dirección?", Toast.LENGTH_LONG).show()
@@ -422,6 +550,7 @@ class PlayerActivity : Activity() {
     private fun openPanel() {
         if (pwView == null) createPanel()
         pwView?.alpha = 1f
+        js("pwPanel.hidden(false)")
         pwOpen = true
         pwAdjust = false
         pwHint.visibility = View.GONE
@@ -435,6 +564,7 @@ class PlayerActivity : Activity() {
         pwOpen = false
         pwAdjust = false
         pwView?.alpha = 0f
+        js("pwPanel.hidden(true)")
         updateHint()
     }
 
@@ -514,6 +644,84 @@ class PlayerActivity : Activity() {
         return true
     }
 
+    // ───────────────────────── mando del móvil ─────────────────────────
+
+    private fun remoteState(): String {
+        val name = queue.getOrNull(index)?.name ?: "—"
+        val pw = if (pwView == null) "" else "  ·  PITWALL " + (if (pwOpen) "abierto" else "oculto") + " · retraso " + pwDelay + " s"
+        val sl = if (sleepAt > 0) "  ·  dormir en " + (((sleepAt - System.currentTimeMillis()) / 60_000L).toInt() + 1) + " min" else ""
+        return "▶ " + name + pw + sl
+    }
+
+    private fun remoteSearch(q: String): String {
+        val words = normText(q).split(" ").filter { it.isNotBlank() }
+        val arr = org.json.JSONArray()
+        if (words.isEmpty()) return arr.toString()
+        var n = 0
+        for (c in prefs.visibleChannels(Xtream.channels)) {
+            if (words.all { c.key.contains(it) }) {
+                arr.put(org.json.JSONObject().put("id", c.id).put("name", c.name))
+                n++
+                if (n >= 30) break
+            }
+        }
+        return arr.toString()
+    }
+
+    private fun adjustDelay(d: Int) {
+        val chId = queue.getOrNull(index)?.id ?: -1
+        js("pwPanel.delay($d)") { r ->
+            r.trim().toDoubleOrNull()?.let {
+                pwDelay = it.toInt()
+                prefs.setPitwallDelay(chId, pwDelay)
+            }
+        }
+    }
+
+    private fun remoteCmd(cmd: String) {
+        val am = getSystemService(AUDIO_SERVICE) as AudioManager
+        when {
+            cmd == "up" -> zap(1)
+            cmd == "down" -> zap(-1)
+            cmd == "prev" -> previousChannel()
+            cmd == "sleep" -> cycleSleep()
+            cmd == "panel" -> if (pwOpen) hidePanel() else if (prefs.pitwallUrl.isNotBlank()) openPanel()
+            cmd == "vol:+" -> am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+            cmd == "vol:-" -> am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+            cmd == "mute" -> am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, AudioManager.FLAG_SHOW_UI)
+            cmd == "adj:0" -> if (pwOpen) {
+                pwAdjust = !pwAdjust
+                js("pwPanel.adjust(" + pwAdjust + ")")
+            }
+            cmd.startsWith("adj:") -> {
+                val d = cmd.substring(4).toIntOrNull() ?: 0
+                if (d != 0) adjustDelay(d)
+            }
+            cmd.startsWith("view:") -> if (pwOpen) js("pwPanel.view(" + (cmd.substring(5).toIntOrNull() ?: 1) + ")")
+            cmd == "sync" -> {
+                val chId = queue.getOrNull(index)?.id ?: -1
+                js("pwPanel.sync()") { r ->
+                    val v = r.trim().toDoubleOrNull() ?: -1.0
+                    if (v < 0) {
+                        Toast.makeText(this, "No hay ningún evento reciente para sincronizar", Toast.LENGTH_LONG).show()
+                    } else {
+                        pwDelay = v.toInt()
+                        prefs.setPitwallDelay(chId, pwDelay)
+                    }
+                }
+            }
+            cmd.startsWith("play:") -> {
+                val id = cmd.substring(5).toIntOrNull() ?: return
+                var idx = queue.indexOfFirst { it.id == id }
+                if (idx < 0) {
+                    queue = playable(id)
+                    idx = queue.indexOfFirst { it.id == id }
+                }
+                if (idx >= 0) play(idx)
+            }
+        }
+    }
+
     override fun onStop() {
         super.onStop()
         finish()
@@ -521,6 +729,8 @@ class PlayerActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        remote?.stop()
+        remote = null
         destroyPanel()
         playerView.player = null
         player?.release()

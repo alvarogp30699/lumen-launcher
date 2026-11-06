@@ -1,6 +1,7 @@
 package com.alvaro.launcher
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -78,6 +79,9 @@ class IptvActivity : Activity() {
         const val ALL = "__all"
         const val SEARCH = "__search"
         private const val REQ_VOICE = 41
+
+        /** Categorías bloqueadas que ya se desbloquearon con el PIN (se olvidan al salir de Lumen IPTV) */
+        val unlocked = HashSet<String>()
     }
 
     private lateinit var ui: Ui
@@ -93,6 +97,7 @@ class IptvActivity : Activity() {
     private var mainShown = false
     private var favs: Set<Int> = emptySet()
     private var current: List<Channel> = emptyList()
+    private var visible: List<Channel> = emptyList()
     private var catId = ALL
     private var longHandled = false
     private var epgToken = 0
@@ -105,10 +110,20 @@ class IptvActivity : Activity() {
         prefs = Prefs(this)
     }
 
+    override fun onDestroy() {
+        unlocked.clear()
+        super.onDestroy()
+    }
+
+    private fun refreshVisible() {
+        visible = prefs.visibleChannels(Xtream.channels, unlocked)
+    }
+
     override fun onResume() {
         super.onResume()
         prefs = Prefs(this)
         favs = prefs.favorites
+        refreshVisible()
         if (!prefs.configured) {
             mainShown = false
             setContentView(promptView())
@@ -121,7 +136,8 @@ class IptvActivity : Activity() {
         } else if (Xtream.channels.isEmpty()) {
             loadData(false)
         } else {
-            adapter.notifyDataSetChanged()
+            buildCategories()
+            selectCategory(if (catId == SEARCH) ALL else catId)
         }
     }
 
@@ -291,9 +307,10 @@ class IptvActivity : Activity() {
             val ok = Xtream.load(applicationContext, prefs, force)
             runOnUiThread {
                 if (ok) {
+                    refreshVisible()
                     buildCategories()
                     selectCategory(if (favs.isNotEmpty()) FAV else ALL)
-                    statusView.text = Xtream.channels.size.toString() + " canales"
+                    statusView.text = visible.size.toString() + " canales"
                     catRows.firstOrNull { it.first == catId }?.second?.requestFocus()
                 } else {
                     statusView.text = "No se pudieron cargar los canales. Revisa la configuración en Ajustes."
@@ -305,17 +322,23 @@ class IptvActivity : Activity() {
     private fun buildCategories() {
         catBox.removeAllViews()
         catRows.clear()
+        val hiddenCh = prefs.hiddenChannels
+        val hiddenCat = prefs.hiddenCats
+        val locked = prefs.lockedCats
         val counts = HashMap<String, Int>()
-        for (c in Xtream.channels) counts[c.cat] = (counts[c.cat] ?: 0) + 1
-        addCatRow(FAV, "★ Favoritos", favs.size)
-        addCatRow(ALL, "Todos", Xtream.channels.size)
-        for (cat in Xtream.categories) {
-            val n = counts[cat.id] ?: 0
-            if (n > 0) addCatRow(cat.id, cat.name, n)
+        for (c in Xtream.channels) if (c.id !in hiddenCh) counts[c.cat] = (counts[c.cat] ?: 0) + 1
+        addCatRow(FAV, "★ Favoritos", favs.size, false)
+        addCatRow(ALL, "Todos", visible.size, false)
+        val order = prefs.catOrder
+        val cats = Xtream.categories.filter { it.id !in hiddenCat && (counts[it.id] ?: 0) > 0 }
+        val sorted = cats.sortedBy { val i = order.indexOf(it.id); if (i < 0) Int.MAX_VALUE else i }
+        for (cat in sorted) {
+            val isLocked = cat.id in locked && cat.id !in unlocked
+            addCatRow(cat.id, (if (isLocked) "🔒 " else "") + cat.name, counts[cat.id] ?: 0, true)
         }
     }
 
-    private fun addCatRow(id: String, name: String, count: Int) {
+    private fun addCatRow(id: String, name: String, count: Int, manage: Boolean) {
         val label = TextView(this).apply {
             text = name
             setSizePx(ui, 26)
@@ -337,7 +360,17 @@ class IptvActivity : Activity() {
             addView(label, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             addView(n)
             setOnFocusChangeListener { _, hasFocus -> if (hasFocus) selectCategory(id) }
-            setOnClickListener { grid.requestFocus() }
+            setOnClickListener {
+                if (manage && id in prefs.lockedCats && id !in unlocked) {
+                    askPinThen { unlocked.add(id); refreshVisible(); buildCategories(); selectCategory(id); catRows.firstOrNull { it.first == id }?.second?.requestFocus() }
+                } else {
+                    grid.requestFocus()
+                }
+            }
+            if (manage) setOnLongClickListener {
+                categoryMenu(id)
+                true
+            }
         }
         catBox.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
             bottomMargin = ui.px(8)
@@ -361,15 +394,19 @@ class IptvActivity : Activity() {
 
     private fun selectCategory(id: String) {
         catId = id
-        current = when (id) {
-            FAV -> Xtream.channels.filter { favs.contains(it.id) }
-            ALL -> Xtream.channels
-            else -> Xtream.channels.filter { it.cat == id }
+        val lockedNow = id != FAV && id != ALL && id in prefs.lockedCats && id !in unlocked
+        current = when {
+            lockedNow -> emptyList()
+            id == FAV -> visible.filter { favs.contains(it.id) }
+            id == ALL -> visible
+            else -> visible.filter { it.cat == id }
         }
         adapter.items = current
         adapter.notifyDataSetChanged()
         styleCategories()
-        if (id == FAV && current.isEmpty()) {
+        if (lockedNow) {
+            statusView.text = "🔒 Categoría bloqueada. Pulsa OK para desbloquear con el PIN"
+        } else if (id == FAV && current.isEmpty()) {
             statusView.text = "Aún no tienes favoritos. Mantén OK pulsado sobre un canal."
         } else {
             statusView.text = current.size.toString() + " canales"
@@ -403,11 +440,8 @@ class IptvActivity : Activity() {
 
     private fun search(q: String) {
         val words = norm(q).split(" ").filter { it.isNotBlank() }
-        if (words.isEmpty() || Xtream.channels.isEmpty()) return
-        val found = Xtream.channels.filter { c ->
-            val n = norm(c.name)
-            words.all { n.contains(it) }
-        }
+        if (words.isEmpty() || visible.isEmpty()) return
+        val found = visible.filter { c -> words.all { c.key.contains(it) } }
         catId = SEARCH
         current = found
         adapter.items = found
@@ -423,6 +457,86 @@ class IptvActivity : Activity() {
         val ch = current.getOrNull(pos) ?: return
         Xtream.queue = current
         startActivity(Intent(this, PlayerActivity::class.java).putExtra("id", ch.id))
+    }
+
+    private fun focusCat(id: String) {
+        catRows.firstOrNull { it.first == id }?.second?.requestFocus()
+    }
+
+    private fun askPinThen(action: () -> Unit) {
+        if (prefs.pin.isBlank()) {
+            Toast.makeText(this, "Primero define un PIN desde el móvil (Ajustes → Configurar IPTV)", Toast.LENGTH_LONG).show()
+            return
+        }
+        PinDialog.ask(this, ui, prefs.pin, action)
+    }
+
+    private fun channelMenu() {
+        val ch = current.getOrNull(grid.selectedItemPosition) ?: return
+        val isFav = favs.contains(ch.id)
+        AlertDialog.Builder(this)
+            .setTitle(ch.name)
+            .setItems(arrayOf(if (isFav) "Quitar de favoritos" else "★ Añadir a favoritos", "Ocultar este canal", "Cancelar")) { _, which ->
+                when (which) {
+                    0 -> toggleFavorite()
+                    1 -> {
+                        prefs.hiddenChannels = prefs.hiddenChannels + ch.id
+                        refreshVisible()
+                        buildCategories()
+                        selectCategory(catId)
+                        grid.requestFocus()
+                        Toast.makeText(this, "Canal oculto. Para recuperarlo: Ajustes → Mostrar ocultos", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun categoryMenu(id: String) {
+        val locked = id in prefs.lockedCats
+        val name = Xtream.categories.firstOrNull { it.id == id }?.name ?: "Categoría"
+        AlertDialog.Builder(this)
+            .setTitle(name)
+            .setItems(arrayOf("Subir al principio", "Ocultar categoría", if (locked) "Quitar bloqueo (pide PIN)" else "🔒 Bloquear con PIN", "Cancelar")) { _, which ->
+                when (which) {
+                    0 -> {
+                        prefs.catOrder = listOf(id) + prefs.catOrder.filter { it != id }
+                        buildCategories()
+                        selectCategory(id)
+                        focusCat(id)
+                    }
+                    1 -> {
+                        prefs.hiddenCats = prefs.hiddenCats + id
+                        refreshVisible()
+                        buildCategories()
+                        selectCategory(ALL)
+                        focusCat(ALL)
+                        Toast.makeText(this, "Categoría oculta. Para recuperarla: Ajustes → Mostrar ocultos", Toast.LENGTH_LONG).show()
+                    }
+                    2 -> {
+                        if (locked) {
+                            askPinThen {
+                                prefs.lockedCats = prefs.lockedCats - id
+                                unlocked.remove(id)
+                                refreshVisible()
+                                buildCategories()
+                                selectCategory(id)
+                                focusCat(id)
+                            }
+                        } else if (prefs.pin.isBlank()) {
+                            Toast.makeText(this, "Primero define un PIN desde el móvil (Ajustes → Configurar IPTV)", Toast.LENGTH_LONG).show()
+                        } else {
+                            prefs.lockedCats = prefs.lockedCats + id
+                            unlocked.remove(id)
+                            refreshVisible()
+                            buildCategories()
+                            selectCategory(ALL)
+                            focusCat(ALL)
+                        }
+                    }
+                }
+            }
+            .show()
     }
 
     private fun toggleFavorite() {
@@ -460,7 +574,7 @@ class IptvActivity : Activity() {
                 if (e.action == KeyEvent.ACTION_DOWN && e.repeatCount == 0) longHandled = false
                 if (e.action == KeyEvent.ACTION_DOWN && e.repeatCount == 1) {
                     longHandled = true
-                    toggleFavorite()
+                    channelMenu()
                     return true
                 }
             }

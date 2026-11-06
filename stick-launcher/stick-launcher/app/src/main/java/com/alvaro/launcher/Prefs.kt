@@ -13,6 +13,54 @@ class Prefs(ctx: Context) {
         sp.edit().putString(k, v).apply()
     }
 
+    // ---- Perfiles: el perfil 0 usa las claves de siempre (así no se pierde nada); los demás llevan prefijo ----
+    var profile: Int
+        get() = sp.getInt("profile", 0).coerceIn(0, 2)
+        set(v) {
+            sp.edit().putInt("profile", v.coerceIn(0, 2)).apply()
+        }
+
+    /** Nombres de los 3 perfiles */
+    var profileNames: List<String>
+        get() {
+            val l = str("profNames", "Yo,Familia,Invitado").split(",").map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
+            val defaults = listOf("Yo", "Familia", "Invitado")
+            while (l.size < 3) l.add(defaults[l.size])
+            return l.take(3)
+        }
+        set(v) = put("profNames", v.joinToString(","))
+
+    private fun pk(k: String): String = if (profile == 0) k else "p" + profile + "_" + k
+    private fun strP(k: String, d: String = ""): String = sp.getString(pk(k), d) ?: d
+    private fun putP(k: String, v: String) {
+        sp.edit().putString(pk(k), v).apply()
+    }
+
+    /** PIN de 4 cifras para las categorías bloqueadas (vacío = sin PIN) */
+    var pin: String
+        get() = str("pin")
+        set(v) = put("pin", v.filter { it.isDigit() }.take(6))
+
+    /** Canales ocultos de la lista (por perfil) */
+    var hiddenChannels: Set<Int>
+        get() = strP("hiddenCh").split(",").mapNotNull { it.toIntOrNull() }.toSet()
+        set(v) = putP("hiddenCh", v.joinToString(","))
+
+    /** Categorías ocultas (por perfil) */
+    var hiddenCats: Set<String>
+        get() = strP("hiddenCat").split(",").filter { it.isNotBlank() }.toSet()
+        set(v) = putP("hiddenCat", v.joinToString(","))
+
+    /** Orden de las categorías: las de esta lista van primero, en este orden (por perfil) */
+    var catOrder: List<String>
+        get() = strP("catOrder").split(",").filter { it.isNotBlank() }
+        set(v) = putP("catOrder", v.joinToString(","))
+
+    /** Categorías bloqueadas con PIN (por perfil) */
+    var lockedCats: Set<String>
+        get() = strP("lockedCat").split(",").filter { it.isNotBlank() }.toSet()
+        set(v) = putP("lockedCat", v.joinToString(","))
+
     private fun putInt(k: String, v: Int) {
         sp.edit().putInt(k, v).apply()
     }
@@ -49,12 +97,14 @@ class Prefs(ctx: Context) {
         set(v) = putInt("sleep", v)
 
     var lastChannelId: Int
-        get() = sp.getInt("lastId", -1)
-        set(v) = putInt("lastId", v)
+        get() = sp.getInt(pk("lastId"), -1)
+        set(v) {
+            sp.edit().putInt(pk("lastId"), v).apply()
+        }
 
     var lastChannelName: String
-        get() = str("lastName")
-        set(v) = put("lastName", v)
+        get() = strP("lastName")
+        set(v) = putP("lastName", v)
 
     var latestCode: Int
         get() = sp.getInt("latestCode", 0)
@@ -78,12 +128,48 @@ class Prefs(ctx: Context) {
         sp.edit().putInt("pwd_$channelId", sec).putInt("pwd_last", sec).apply()
     }
 
+    /** Canales visibles para este perfil: sin ocultos ni de categorías ocultas/bloqueadas (salvo desbloqueadas). */
+    fun visibleChannels(all: List<Channel>, unlocked: Set<String> = emptySet()): List<Channel> {
+        val hc = hiddenChannels
+        val hcat = hiddenCats
+        val locked = lockedCats.filter { it !in unlocked }.toSet()
+        return all.filter { it.id !in hc && it.cat !in hcat && it.cat !in locked }
+    }
+
     /** Avisos de F1 (bandera amarilla, safety car…) sobre el vídeo, con el retraso aplicado */
     var pitwallAlerts: Boolean
         get() = sp.getBoolean("pwAlerts", true)
         set(v) {
             sp.edit().putBoolean("pwAlerts", v).apply()
         }
+
+    /** Siglas de tus pilotos favoritos, p. ej. VER,ALO: solo avisos de ellos (más los de bandera y lluvia) */
+    var pitwallFavs: String
+        get() = strP("pwFavs", str("pwFavs"))
+        set(v) = putP("pwFavs", v.uppercase().replace(" ", ""))
+
+    /** Abrir el panel solo al empezar una sesión de F1 y cerrarlo al acabar */
+    var pitwallAuto: Boolean
+        get() = sp.getBoolean("pwAuto", true)
+        set(v) {
+            sp.edit().putBoolean("pwAuto", v).apply()
+        }
+
+    /** Código secreto del mando del móvil (se genera una vez) */
+    val remoteToken: String
+        get() {
+            var t = str("remoteTok")
+            if (t.isBlank()) {
+                t = java.util.UUID.randomUUID().toString().replace("-", "").take(12)
+                put("remoteTok", t)
+            }
+            return t
+        }
+
+    /** Última versión nueva por la que ya se preguntó, para no insistir */
+    var askedCode: Int
+        get() = sp.getInt("askedCode", 0)
+        set(v) = putInt("askedCode", v)
 
     /** Copia de seguridad de todos los ajustes (JSON). Incluye la contraseña de la lista: guárdala en un sitio privado. */
     fun exportJson(): String {
@@ -131,19 +217,19 @@ class Prefs(ctx: Context) {
         get() = server.isNotBlank() && user.isNotBlank() && pass.isNotBlank()
 
     var favorites: Set<Int>
-        get() = str("favs").split(",").mapNotNull { it.toIntOrNull() }.toSet()
-        set(v) = put("favs", v.joinToString(","))
+        get() = strP("favs").split(",").mapNotNull { it.toIntOrNull() }.toSet()
+        set(v) = putP("favs", v.joinToString(","))
 
     var pinned: List<String>
-        get() = if (sp.contains("pinned")) str("pinned").split(",").filter { it.isNotBlank() } else DEFAULT_PINS
-        set(v) = put("pinned", v.joinToString(","))
+        get() = if (sp.contains(pk("pinned"))) strP("pinned").split(",").filter { it.isNotBlank() } else DEFAULT_PINS
+        set(v) = putP("pinned", v.joinToString(","))
 
     var hidden: Set<String>
-        get() = str("hidden").split(",").filter { it.isNotBlank() }.toSet()
-        set(v) = put("hidden", v.joinToString(","))
+        get() = strP("hidden").split(",").filter { it.isNotBlank() }.toSet()
+        set(v) = putP("hidden", v.joinToString(","))
 
     companion object {
-        private val SKIP = setOf("latestCode", "lastCheck")
+        private val SKIP = setOf("latestCode", "lastCheck", "askedCode", "profile")
         val DEFAULT_PINS = listOf(
             "com.teamsmart.videomanager.tv",
             "com.dazn",

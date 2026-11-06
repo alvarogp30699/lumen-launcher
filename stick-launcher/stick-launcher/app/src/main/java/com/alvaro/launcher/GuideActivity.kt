@@ -43,7 +43,7 @@ class GuideActivity : Activity() {
         ui = Ui(this)
         prefs = Prefs(this)
 
-        val queue = Xtream.queue.ifEmpty { Xtream.channels }
+        val queue = Xtream.queue.ifEmpty { prefs.visibleChannels(Xtream.channels) }
         channels = queue.take(25)
         val now = System.currentTimeMillis() / 1000
         windowStart = now - (now % 1800)

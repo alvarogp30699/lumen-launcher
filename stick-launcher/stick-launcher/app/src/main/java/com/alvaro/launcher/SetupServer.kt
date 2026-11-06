@@ -11,6 +11,7 @@ import kotlin.concurrent.thread
  * Cada sesión usa un código aleatorio en el enlace del QR; sin él responde 403.
  */
 class SetupServer(
+    private val appCtx: android.content.Context,
     private val prefs: Prefs,
     private val token: String,
     private val onSaved: () -> Unit
@@ -124,6 +125,13 @@ class SetupServer(
                 Xtream.channels = emptyList()
                 onSaved()
                 respond(c, 200, page(if (n > 0) "Copia restaurada ($n ajustes)." else "Ese archivo no es una copia válida."))
+            } else if (method == "GET" && path == "/log") {
+                if (query["k"] != token) {
+                    respond(c, 403, "<p>Código incorrecto. Vuelve a escanear el QR.</p>")
+                    return
+                }
+                val txt = ErrorLog.read(appCtx)
+                respond(c, 200, if (txt.isBlank()) "Sin errores registrados." else txt, "text/plain; charset=utf-8", "lumen-errores.txt")
             } else if (method == "GET" && path == "/backup") {
                 if (query["k"] != token) {
                     respond(c, 403, "<p>Código incorrecto. Vuelve a escanear el QR.</p>")
@@ -157,6 +165,10 @@ class SetupServer(
         f["repo"]?.let { prefs.updateRepo = it }
         f["pitwall"]?.let { prefs.pitwallUrl = it }
         f["alerts"]?.let { prefs.pitwallAlerts = (it == "1") }
+        f["auto"]?.let { prefs.pitwallAuto = (it == "1") }
+        f["favs"]?.let { prefs.pitwallFavs = it }
+        f["profiles"]?.let { if (it.isNotBlank()) prefs.profileNames = it.split(",") }
+        f["pin"]?.let { prefs.pin = it }
         f["quality"]?.let { if (it in listOf("auto", "4k", "1080p")) prefs.quality = it }
         f["format"]?.let { if (it in listOf("m3u8", "ts")) prefs.format = it }
         f["sleep"]?.toIntOrNull()?.let { prefs.sleepMinutes = it }
@@ -220,14 +232,27 @@ $note
 <select name="format">${opt("m3u8", prefs.format, "m3u8 (HLS)")}${opt("ts", prefs.format, "ts")}</select>
 <label>Temporizador de reproducción</label>
 <select name="sleep">$sleepOptions</select>
-<label>PITWALL <small>(dirección de tu PC, p. ej. http://192.168.1.50:3000)</small></label>
+<label>PITWALL <small>(dirección de tu PC, p. ej. http://192.168.0.33:3100)</small></label>
 <input name="pitwall" value="${esc(prefs.pitwallUrl)}" autocapitalize="off" autocomplete="off">
 <label>Avisos de F1 sobre el vídeo <small>(bandera amarilla, safety car… con tu retraso)</small></label>
 <select name="alerts">${opt("1", if (prefs.pitwallAlerts) "1" else "0", "Activados")}${opt("0", if (prefs.pitwallAlerts) "1" else "0", "Desactivados")}</select>
+<label>Pilotos favoritos de F1 <small>(siglas separadas por coma, p. ej. VER,ALO. Vacío = sin favoritos)</small></label>
+<input name="favs" value="${esc(prefs.pitwallFavs)}" autocapitalize="characters" autocomplete="off">
+<label>Panel automático <small>(se abre al empezar la sesión y se cierra al acabar)</small></label>
+<select name="auto">${opt("1", if (prefs.pitwallAuto) "1" else "0", "Activado")}${opt("0", if (prefs.pitwallAuto) "1" else "0", "Desactivado")}</select>
+<label>Perfiles <small>(3 nombres separados por coma; cada perfil tiene sus favoritos, canales ocultos y apps)</small></label>
+<input name="profiles" value="${esc(prefs.profileNames.joinToString(","))}" autocomplete="off">
+<label>PIN para categorías bloqueadas <small>(4 cifras; vacío = sin PIN)</small></label>
+<input name="pin" type="password" inputmode="numeric" maxlength="6" value="${esc(prefs.pin)}" autocomplete="off">
 <label>Repositorio de actualizaciones <small>(usuario/repositorio de GitHub)</small></label>
 <input name="repo" value="${esc(prefs.updateRepo)}" autocapitalize="off" autocomplete="off">
 <button type="submit">Guardar</button>
 </form>
+<h2 style="margin-top:40px;font-size:20px">Mando y diagnóstico</h2>
+<a id="rl" href="#" style="display:block;text-align:center;padding:16px;border-radius:14px;background:#1D2330;color:#F3F4F7;text-decoration:none;font-weight:700">Abrir el mando del móvil (guárdalo en favoritos)</a>
+<p><small>Solo funciona mientras ves un canal en el stick.</small></p>
+<a href="/log?k=$token" style="display:block;text-align:center;padding:16px;border-radius:14px;background:#1D2330;color:#F3F4F7;text-decoration:none;font-weight:700">Descargar registro de errores</a>
+<script>document.getElementById('rl').href='http://'+location.hostname+':8099/?k=${prefs.remoteToken}';</script>
 <h2 style="margin-top:40px;font-size:20px">Copia de seguridad</h2>
 <p><small>Guarda favoritos, retrasos por canal, apps ocultas y la configuración (incluida la contraseña de la lista: guárdala en un sitio privado).</small></p>
 <a href="/backup?k=$token" style="display:block;text-align:center;padding:16px;border-radius:14px;background:#1D2330;color:#F3F4F7;text-decoration:none;font-weight:700">Descargar copia</a>

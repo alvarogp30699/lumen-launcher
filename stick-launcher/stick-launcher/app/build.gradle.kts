@@ -30,6 +30,8 @@ android {
 
     buildTypes {
         debug {
+            // Sin modo depuración: la app va bastante más rápida en el stick
+            isDebuggable = false
             signingConfig = signingConfigs.getByName("launcher")
         }
         release {

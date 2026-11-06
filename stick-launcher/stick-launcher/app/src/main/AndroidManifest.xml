@@ -31,6 +31,7 @@
     </queries>
 
     <application
+        android:name=".App"
         android:allowBackup="false"
         android:banner="@drawable/ic_banner"
         android:icon="@drawable/ic_launcher"
@@ -68,6 +69,10 @@
             android:screenOrientation="landscape" />
         <activity
             android:name=".IptvActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+        <activity
+            android:name=".F1Activity"
             android:exported="false"
             android:screenOrientation="landscape" />
         <activity

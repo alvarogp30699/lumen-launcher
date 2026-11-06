@@ -1,8 +1,11 @@
 package com.alvaro.launcher
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
 import android.widget.HorizontalScrollView
@@ -21,6 +24,10 @@ import org.json.JSONObject
 /** Pantalla de inicio. Se registra como HOME, así Android la abre sola al encender el stick. */
 class MainActivity : Activity() {
 
+    private companion object {
+        val iconCache = HashMap<String, android.graphics.drawable.Drawable.ConstantState>()
+    }
+
     private val defaultNames = mapOf(
         "com.teamsmart.videomanager.tv" to "SmartTube",
         "com.liskovsoft.smarttubetv.beta" to "SmartTube",
@@ -33,6 +40,7 @@ class MainActivity : Activity() {
         super.onResume()
         Updater.checkInBackground(this)
         build()
+        offerUpdate()
     }
 
     @Suppress("OVERRIDE_DEPRECATION")
@@ -53,6 +61,7 @@ class MainActivity : Activity() {
         }
 
         root.addView(topBar(ui, prefs))
+        root.addView(warningBar(ui, prefs))
         root.addView(hero(ui, prefs))
 
         val label = TextView(this).apply {
@@ -79,15 +88,7 @@ class MainActivity : Activity() {
             val pkg = resolve(saved)
             val installed = isInstalled(pkg)
             val name = if (installed) appLabel(pkg) else (defaultNames[pkg] ?: pkg)
-            val icon = if (installed) {
-                try {
-                    packageManager.getApplicationIcon(pkg)
-                } catch (e: Exception) {
-                    null
-                }
-            } else {
-                null
-            }
+            val icon = if (installed) cachedIcon(pkg) else null
             val tile = makeTile(this, ui, name, icon, !installed, onClick = {
                 if (!installed || !launchPackage(this, pkg)) {
                     Toast.makeText(
@@ -100,6 +101,15 @@ class MainActivity : Activity() {
             addTile(row, tile, ui)
         }
 
+        if (prefs.pitwallUrl.isNotBlank()) {
+            addTile(
+                row,
+                makeTile(this, ui, "Calendario F1", circleIcon(Color.parseColor("#E10600")), false, onClick = {
+                    startActivity(Intent(this, F1Activity::class.java))
+                }),
+                ui
+            )
+        }
         addTile(
             row,
             makeTile(this, ui, "Ajustes", circleIcon(Colors.MUTED), false, onClick = {
@@ -148,6 +158,67 @@ class MainActivity : Activity() {
         })
     }
 
+    private var lastHealth = 0L
+    private var lastWarnings: String = ""
+
+    /** Franja de avisos: lista IPTV o PITWALL que no responden, con el motivo. Se comprueba como mucho cada 3 min. */
+    private fun warningBar(ui: Ui, prefs: Prefs): View {
+        val tv = TextView(this).apply {
+            setTextColor(Color.parseColor("#1A1203"))
+            setSizePx(ui, 24)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(ui.px(24), ui.px(12), ui.px(24), ui.px(12))
+            background = GradientDrawable().apply {
+                cornerRadius = ui.px(14).toFloat()
+                setColor(Color.parseColor("#FFD400"))
+            }
+            text = lastWarnings
+            visibility = if (lastWarnings.isBlank()) View.GONE else View.VISIBLE
+        }
+        val now = System.currentTimeMillis()
+        if (now - lastHealth > 180_000L && (prefs.configured || prefs.pitwallUrl.isNotBlank())) {
+            lastHealth = now
+            thread {
+                val msgs = Health.check(prefs)
+                lastWarnings = msgs.joinToString("   ·   ")
+                runOnUiThread {
+                    if (!isFinishing) {
+                        tv.text = lastWarnings
+                        tv.visibility = if (lastWarnings.isBlank()) View.GONE else View.VISIBLE
+                    }
+                }
+            }
+        }
+        val box = LinearLayout(this)
+        box.addView(tv)
+        return box
+    }
+
+    /** Si hay una versión nueva, pregunta una sola vez si se instala ahora. */
+    private fun offerUpdate() {
+        val prefs = Prefs(this)
+        val latest = prefs.latestCode
+        if (latest <= Updater.installedCode(this) || latest <= prefs.askedCode || prefs.updateRepo.isBlank()) return
+        prefs.askedCode = latest
+        AlertDialog.Builder(this)
+            .setTitle("Nueva versión de Lumen Launcher")
+            .setMessage("Hay una actualización (v1.$latest). ¿Instalarla ahora? Tarda un minuto.")
+            .setPositiveButton("Instalar") { _, _ ->
+                thread {
+                    val info = Updater.latest(prefs.updateRepo)
+                    runOnUiThread {
+                        if (info != null) {
+                            Updater.downloadAndInstall(this, info) { msg -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
+                        } else {
+                            Toast.makeText(this, "No se pudo comprobar la actualización", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            }
+            .setNegativeButton("Luego", null)
+            .show()
+    }
+
     private fun topBar(ui: Ui, prefs: Prefs): View {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -184,7 +255,14 @@ class MainActivity : Activity() {
             typeface = Typeface.DEFAULT_BOLD
             setPadding(ui.px(28), 0, 0, 0)
         }
+        val profile = makeButton(this, ui, "👤  " + prefs.profileNames[prefs.profile], false) {
+            prefs.profile = (prefs.profile + 1) % 3
+            IptvActivity.unlocked.clear()
+            Xtream.queue = emptyList()
+            build()
+        }
         bar.addView(title)
+        bar.addView(profile, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = ui.px(36) })
         bar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         bar.addView(update)
         bar.addView(date)
@@ -285,7 +363,7 @@ class MainActivity : Activity() {
                 }
                 if (text == null) return@thread
                 if (prefs.configured && Xtream.channels.isEmpty()) Xtream.load(applicationContext, prefs, false)
-                val f1 = Xtream.channels.firstOrNull { c -> f1ChannelWords.any { c.name.lowercase().contains(it) } }
+                val f1 = prefs.visibleChannels(Xtream.channels).firstOrNull { c -> f1ChannelWords.any { c.name.lowercase().contains(it) } }
                 runOnUiThread {
                     if (isFinishing) return@runOnUiThread
                     label.text = text
@@ -302,6 +380,19 @@ class MainActivity : Activity() {
             }
         }
         return row
+    }
+
+    /** Los iconos se leen una sola vez: reconstruir el inicio es así mucho más rápido. */
+    private fun cachedIcon(pkg: String): android.graphics.drawable.Drawable? {
+        val cs = iconCache[pkg]
+        if (cs != null) return cs.newDrawable(resources)
+        return try {
+            val d = packageManager.getApplicationIcon(pkg)
+            d.constantState?.let { iconCache[pkg] = it }
+            d
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun isInstalled(pkg: String): Boolean =

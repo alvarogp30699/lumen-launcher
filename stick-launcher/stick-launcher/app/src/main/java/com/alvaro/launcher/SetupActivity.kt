@@ -79,7 +79,7 @@ class SetupActivity : Activity() {
         setContentView(root)
 
         val token = (100000..999999).random().toString()
-        val s = SetupServer(prefs, token) {
+        val s = SetupServer(applicationContext, prefs, token) {
             // datos nuevos: se descarta la lista guardada para que se recargue
             Xtream.clearCache(applicationContext)
             Xtream.channels = emptyList()

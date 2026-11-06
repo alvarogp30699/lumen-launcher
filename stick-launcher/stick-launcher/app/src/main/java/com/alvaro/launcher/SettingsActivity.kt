@@ -80,6 +80,16 @@ class SettingsActivity : Activity() {
             Xtream.channels = emptyList()
             Toast.makeText(this, "Caché limpiada", Toast.LENGTH_SHORT).show()
         }
+        val nHidden = prefs.hiddenChannels.size + prefs.hiddenCats.size
+        add("Mostrar canales y categorías ocultos", if (nHidden == 0) "Ninguno" else "$nHidden ocultos") {
+            prefs.hiddenChannels = emptySet()
+            prefs.hiddenCats = emptySet()
+            Toast.makeText(this, "Ya se ven todos otra vez", Toast.LENGTH_SHORT).show()
+            build()
+        }
+        add("Comprobar canales favoritos", "") { checkFavorites() }
+        val logSize = ErrorLog.read(this).length
+        add("Registro de errores", if (logSize == 0) "Vacío" else (logSize / 1024 + 1).toString() + " KB") { showLog() }
         add("Ajustes del sistema", "") {
             startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
@@ -205,6 +215,74 @@ class SettingsActivity : Activity() {
                 }
             }
         }
+    }
+
+    // ---- Comprobar favoritos ----
+
+    /** Prueba uno a uno los favoritos del perfil y lista los que no responden. Conviene hacerlo sin estar viendo un canal. */
+    private fun checkFavorites() {
+        if (!prefs.configured) {
+            Toast.makeText(this, "Primero configura la lista IPTV", Toast.LENGTH_LONG).show()
+            return
+        }
+        Toast.makeText(this, "Comprobando favoritos…", Toast.LENGTH_SHORT).show()
+        thread {
+            if (Xtream.channels.isEmpty()) Xtream.load(applicationContext, prefs, false)
+            val favIds = prefs.favorites
+            val favs = Xtream.channels.filter { it.id in favIds }
+            val dead = ArrayList<Channel>()
+            for (ch in favs) {
+                var ok = false
+                try {
+                    val c = java.net.URL(Xtream.streamUrl(prefs, ch.id)).openConnection() as java.net.HttpURLConnection
+                    c.connectTimeout = 6000
+                    c.readTimeout = 6000
+                    c.setRequestProperty("User-Agent", "LumenLauncher/0.2")
+                    try {
+                        ok = c.responseCode in 200..299 && c.inputStream.read() >= 0
+                    } finally {
+                        c.disconnect()
+                    }
+                } catch (e: Exception) {
+                    ok = false
+                }
+                if (!ok) dead.add(ch)
+                Thread.sleep(300)
+            }
+            runOnUiThread {
+                if (isFinishing) return@runOnUiThread
+                if (favs.isEmpty()) {
+                    Toast.makeText(this, "No tienes favoritos en este perfil", Toast.LENGTH_LONG).show()
+                } else if (dead.isEmpty()) {
+                    Toast.makeText(this, "Los " + favs.size + " favoritos responden", Toast.LENGTH_LONG).show()
+                } else {
+                    AlertDialog.Builder(this)
+                        .setTitle(dead.size.toString() + " de " + favs.size + " no responden")
+                        .setMessage(dead.joinToString("\n") { it.name })
+                        .setPositiveButton("Quitar de favoritos") { _, _ ->
+                            prefs.favorites = prefs.favorites - dead.map { it.id }.toSet()
+                            build()
+                        }
+                        .setNegativeButton("Dejarlos", null)
+                        .show()
+                }
+            }
+        }
+    }
+
+    // ---- Registro de errores ----
+
+    private fun showLog() {
+        val txt = ErrorLog.read(this)
+        AlertDialog.Builder(this)
+            .setTitle("Registro de errores")
+            .setMessage(if (txt.isBlank()) "No hay errores registrados." else txt.takeLast(2500))
+            .setPositiveButton("Cerrar", null)
+            .setNeutralButton("Borrar") { _, _ ->
+                ErrorLog.clear(this)
+                build()
+            }
+            .show()
     }
 
     // ---- Estado del stick ----
