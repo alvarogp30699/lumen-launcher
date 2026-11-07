@@ -16,7 +16,7 @@ object PinDialog {
             text = "Introduce el PIN"
             setTextColor(Colors.TEXT)
             setSizePx(ui, 30)
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = Fonts.bold
             gravity = Gravity.CENTER
         }
         val dots = TextView(act).apply {

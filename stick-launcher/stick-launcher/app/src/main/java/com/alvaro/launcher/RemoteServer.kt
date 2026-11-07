@@ -6,8 +6,14 @@ import java.net.URLDecoder
 import java.text.Normalizer
 import kotlin.concurrent.thread
 
-fun normText(s: String): String =
-    Normalizer.normalize(s.lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+private val accents = Regex("\\p{InCombiningDiacriticalMarks}+")
+
+/** Texto en minúsculas y sin tildes para buscar. Los nombres sin tildes (la mayoría) no pasan por el normalizador. */
+fun normText(s: String): String {
+    val low = s.lowercase()
+    if (low.all { it.code < 128 }) return low
+    return accents.replace(Normalizer.normalize(low, Normalizer.Form.NFD), "")
+}
 
 /**
  * Mando desde el móvil: mini servidor web que solo está activo mientras se reproduce un canal.
@@ -26,10 +32,19 @@ class RemoteServer(
     fun start() {
         running = true
         thread {
-            val s = try {
-                ServerSocket(PORT)
-            } catch (e: Exception) {
-                null
+            // si otro mando (p. ej. el de PITWALL sobre DAZN) aún está cerrando, se reintenta un momento
+            var s: ServerSocket? = null
+            for (i in 0 until 8) {
+                s = try {
+                    ServerSocket().apply {
+                        reuseAddress = true
+                        bind(java.net.InetSocketAddress(PORT))
+                    }
+                } catch (e: Exception) {
+                    null
+                }
+                if (s != null || !running) break
+                Thread.sleep(500)
             }
             socket = s
             if (s == null) return@thread
@@ -118,34 +133,45 @@ class RemoteServer(
         private val PAGE = """<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Mando Lumen</title>
 <style>
-body{font-family:system-ui,sans-serif;background:#0B0D12;color:#F3F4F7;margin:0;padding:18px;max-width:520px}
-h1{font-size:22px;margin:0 0 6px}h3{margin:22px 0 8px;color:#9AA3B5;font-size:14px;font-weight:600}
-#st{background:#151922;border-radius:12px;padding:12px;font-size:15px;color:#F5B544}
-.g{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-button{padding:16px 6px;border:0;border-radius:14px;background:#1D2330;color:#F3F4F7;font-size:17px;font-weight:700}
-button:active{background:#F5B544;color:#1A1203}
-input{width:100%;box-sizing:border-box;padding:14px;border-radius:12px;border:1px solid #2B3345;background:#151922;color:#F3F4F7;font-size:17px}
-#r button{width:100%;margin-top:8px;text-align:left;padding:14px;font-weight:600}
+*{box-sizing:border-box}body{font-family:Inter,system-ui,sans-serif;background:#07080C;color:#F3F4F7;margin:0;padding:22px 18px;max-width:520px}
+.top{display:flex;align-items:center;gap:10px}.top b{font-size:22px}.dot{width:26px;height:26px;border-radius:50%;border:3px solid #F5B544;display:flex;align-items:center;justify-content:center}.dot i{width:10px;height:10px;border-radius:50%;background:#F5B544}
+.ok{margin-left:auto;font-size:14px;color:#7DD3A0}
+#st{margin-top:14px;background:#12151D;border-radius:20px;padding:16px;font-size:16px;font-weight:600;line-height:1.4}
+h3{margin:20px 0 10px;color:#A3ABBA;font-size:13px;font-weight:700;letter-spacing:.06em}
+.g{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.g2{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+button{font:inherit;padding:16px 6px;border:0;border-radius:16px;background:#1A1F2B;color:#F3F4F7;font-size:16px;font-weight:700}
+button:active,button.on{background:#F5B544;color:#1A1203}
+.big{width:100%;height:150px;border-radius:28px;background:#F5B544;color:#1A1203;font-size:36px;font-weight:800;margin-bottom:10px}
+.big small{display:block;font-size:14px;font-weight:600;margin-top:6px}
+input{width:100%;padding:14px;border-radius:14px;border:1px solid #2B3345;background:#12151D;color:#F3F4F7;font-size:17px}
+#r button{width:100%;margin-top:8px;text-align:left;padding:14px;font-weight:600;background:#12151D}
 </style></head><body>
-<h1>Mando Lumen</h1><div id="st">Conectando…</div>
+<div class="top"><div class="dot"><i></i></div><b>Mando Lumen</b><span class="ok" id="ok">Conectando…</span></div>
+<div id="st">…</div>
 <h3>CANAL Y VOLUMEN</h3>
 <div class="g">
-<button onclick="c('prev')">⏮ Anterior</button><button onclick="c('up')">▲ Canal +</button><button onclick="c('down')">▼ Canal −</button>
-<button onclick="c('vol:-')">🔉 Vol −</button><button onclick="c('vol:+')">🔊 Vol +</button><button onclick="c('mute')">🔇 Silencio</button>
+<button onclick="c('up')">▲ Canal</button><button onclick="c('prev')">◀ Anterior</button><button onclick="c('list')">Lista</button>
+<button onclick="c('down')">▼ Canal</button><button onclick="c('vol:-')">Vol −</button><button onclick="c('vol:+')">Vol +</button>
 </div>
-<h3>PITWALL (F1)</h3>
-<div class="g">
-<button onclick="c('sleep')">😴 Dormir</button><button onclick="c('panel')">Panel</button><button onclick="c('sync')">Sincronizar</button><button onclick="c('adj:0')">Retraso</button>
-<button onclick="c('adj:-5')">−5 s</button><button onclick="c('adj:-1')">−1 s</button><button onclick="c('adj:1')">+1 s</button>
-<button onclick="c('adj:5')">+5 s</button><button onclick="c('view:-1')">◀ Vista</button><button onclick="c('view:1')">Vista ▶</button>
-</div>
+<h3>PANEL Y RETRASO</h3>
+<div class="g2"><button onclick="c('panel')">Mostrar u ocultar panel</button><button onclick="c('sync')">Sincronizar</button></div>
+<div class="g" style="margin-top:10px"><button onclick="c('adj:-5')">−5 s</button><button onclick="c('adj:-1')">−1 s</button><button onclick="c('adj:1')">+1 s</button>
+<button onclick="c('adj:5')">+5 s</button><button onclick="c('view:-1')">◀ Vista</button><button onclick="c('view:1')">Vista ▶</button></div>
+<h3>F1 EN DAZN</h3>
+<button class="big" onclick="c('vuelta')">¡Vuelta!<small>Tócalo cuando cambie el contador de vueltas de la tele</small></button>
+<div class="g"><button onclick="c('salida')">Salida</button><button onclick="c('undo')">Deshacer</button><button onclick="c('stop')">Quitar PITWALL</button></div>
+<div class="g" style="margin-top:10px"><button id="m_compact" onclick="c('mode:compact')">Compacto</button><button id="m_full" onclick="c('mode:full')">Completo</button><button id="m_alerts" onclick="c('mode:alerts')">Solo avisos</button></div>
 <h3>BUSCAR CANAL</h3>
 <input id="q" placeholder="Escribe un canal…" oninput="s()" autocomplete="off">
 <div id="r"></div>
+<h3>OTROS</h3>
+<div class="g2"><button onclick="c('sleep')">Dormir</button><button onclick="c('mute')">Silencio</button></div>
 <script>
 var K=new URLSearchParams(location.search).get('k');
-function c(x){fetch('/cmd?k='+K+'&c='+encodeURIComponent(x)).then(function(){setTimeout(st,300)});}
-function st(){fetch('/state?k='+K).then(function(r){return r.text()}).then(function(t){document.getElementById('st').textContent=t}).catch(function(){document.getElementById('st').textContent='Sin conexión con el stick (¿hay un canal en marcha?)'});}
+function c(x){if(navigator.vibrate)navigator.vibrate(30);fetch('/cmd?k='+K+'&c='+encodeURIComponent(x)).then(function(){setTimeout(st,300)});}
+function st(){fetch('/state?k='+K).then(function(r){return r.text()}).then(function(t){document.getElementById('st').textContent=t;document.getElementById('ok').textContent='Conectado';
+['compact','full','alerts'].forEach(function(m){var n={compact:'compacto',full:'completo',alerts:'solo avisos'}[m];document.getElementById('m_'+m).className=t.indexOf('PITWALL '+n)>=0?'on':'';});})
+.catch(function(){document.getElementById('ok').textContent='Sin conexión';document.getElementById('st').textContent='No hay nada abierto en el stick que use el mando (un canal o DAZN con PITWALL).'});}
 var tm;function s(){clearTimeout(tm);tm=setTimeout(function(){var v=document.getElementById('q').value;if(v.length<2){document.getElementById('r').innerHTML='';return;}
 fetch('/search?k='+K+'&q='+encodeURIComponent(v)).then(function(r){return r.json()}).then(function(l){var b=document.getElementById('r');b.innerHTML='';l.forEach(function(x){var e=document.createElement('button');e.textContent=x.name;e.onclick=function(){c('play:'+x.id)};b.appendChild(e);});});},300);}
 st();setInterval(st,3000);

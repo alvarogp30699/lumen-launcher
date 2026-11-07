@@ -11,7 +11,6 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -50,7 +49,7 @@ class GuideActivity : Activity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Colors.BG)
+            background = homeBackground(ui)
             setPadding(ui.px(80), ui.px(48), ui.px(80), ui.px(40))
         }
         val head = LinearLayout(this).apply {
@@ -61,7 +60,7 @@ class GuideActivity : Activity() {
             text = "Guía de programación"
             setTextColor(Colors.TEXT)
             setSizePx(ui, 40)
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = Fonts.bold
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         head.addView(TextView(this).apply {
             text = "OK: ver el canal   ·   Atrás: volver"
@@ -97,7 +96,7 @@ class GuideActivity : Activity() {
                 text = ch.name
                 setTextColor(Colors.TEXT)
                 setSizePx(ui, 26)
-                typeface = Typeface.DEFAULT_BOLD
+                typeface = Fonts.bold
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END
                 gravity = Gravity.CENTER_VERTICAL

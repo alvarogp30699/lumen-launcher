@@ -63,8 +63,10 @@ class AppsActivity : Activity() {
             if (isHidden && !showHidden) continue
             val label = info.loadLabel(pm).toString()
             val tile = makeTile(
-                this, ui, label, info.loadIcon(pm), isHidden,
+                this, ui, label, MainActivity.iconCache[pkg]?.newDrawable(resources) ?: info.loadIcon(pm).also { d -> d.constantState?.let { MainActivity.iconCache[pkg] = it } }, isHidden,
+                banner = info.activityInfo.loadBanner(pm),
                 onClick = {
+                    Prefs(this).lastApp = pkg
                     startActivity(
                         Intent(Intent.ACTION_MAIN)
                             .setComponent(ComponentName(pkg, cls))
@@ -88,7 +90,7 @@ class AppsActivity : Activity() {
             text = "Todas las aplicaciones"
             setTextColor(Colors.TEXT)
             setSizePx(ui, 34)
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = Fonts.bold
         }
         val toggle = makeButton(
             this, ui,
@@ -122,8 +124,9 @@ class AppsActivity : Activity() {
             addView(hint)
         }
         val scroll = ScrollView(this).apply {
-            setBackgroundColor(Colors.BG)
             isVerticalScrollBarEnabled = false
+            isFillViewport = true
+            background = homeBackground(ui)
             addView(content)
         }
         setContentView(scroll)

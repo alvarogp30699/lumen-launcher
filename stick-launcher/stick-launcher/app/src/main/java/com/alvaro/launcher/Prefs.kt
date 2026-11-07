@@ -133,7 +133,16 @@ class Prefs(ctx: Context) {
         val hc = hiddenChannels
         val hcat = hiddenCats
         val locked = lockedCats.filter { it !in unlocked }.toSet()
+        // sin nada oculto ni bloqueado se devuelve la misma lista (no se copian miles de canales)
+        if (hc.isEmpty() && hcat.isEmpty() && locked.isEmpty()) return all
         return all.filter { it.id !in hc && it.cat !in hcat && it.cat !in locked }
+    }
+
+    /** Retraso del marcador de fútbol por canal (segundos): así no te enteras del gol antes de verlo */
+    fun footDelay(channelId: Int): Int = sp.getInt("fd_$channelId", sp.getInt("fd_last", 45))
+
+    fun setFootDelay(channelId: Int, sec: Int) {
+        sp.edit().putInt("fd_$channelId", sec).putInt("fd_last", sec).apply()
     }
 
     /** Avisos de F1 (bandera amarilla, safety car…) sobre el vídeo, con el retraso aplicado */
@@ -213,6 +222,93 @@ class Prefs(ctx: Context) {
         }
     }
 
+    private fun bool(k: String, d: Boolean): Boolean = sp.getBoolean(k, d)
+    private fun setBool(k: String, v: Boolean) {
+        sp.edit().putBoolean(k, v).apply()
+    }
+
+    // ---- Sincronización ----
+    /** Fútbol: leer el reloj del partido en la imagen y calcular el retraso solo */
+    var syncAuto: Boolean
+        get() = bool("syncAuto", true)
+        set(v) = setBool("syncAuto", v)
+
+    /** Fútbol: los goles no salen en el panel hasta que cambie el marcador de la tele */
+    var goalsGate: Boolean
+        get() = bool("goalsGate", true)
+        set(v) = setBool("goalsGate", v)
+
+    /** Margen de seguridad que se suma al retraso calculado (s) */
+    var syncMargin: Int
+        get() = sp.getInt("syncMargin", 10)
+        set(v) = putInt("syncMargin", v.coerceIn(0, 60))
+
+    /** Últimas mediciones del retraso de DAZN (s), para arrancar con la mediana */
+    var daznDelays: List<Double>
+        get() = str("daznDelays").split(",").mapNotNull { it.toDoubleOrNull() }
+        set(v) = put("daznDelays", v.takeLast(12).joinToString(",") { String.format(java.util.Locale.US, "%.1f", it) })
+
+    fun daznDelay(): Int {
+        val l = daznDelays.sorted()
+        return if (l.isEmpty()) 30 else l[l.size / 2].toInt()
+    }
+
+    /** Tecla del mando que hace de «¡Vuelta!» dentro de DAZN (mantenerla pulsada) */
+    var vueltaKey: String
+        get() = str("vueltaKey", "MENU")
+        set(v) = put("vueltaKey", v)
+
+    /** Modo de PITWALL sobre DAZN: compact, full o alerts */
+    var overlayMode: String
+        get() = str("overlayMode", "compact")
+        set(v) = put("overlayMode", v)
+
+    // ---- Avisos ----
+    /** Avisar 10 min antes de cada partido del Real Madrid */
+    var notifyMadrid: Boolean
+        get() = bool("notifyMadrid", true)
+        set(v) = setBool("notifyMadrid", v)
+
+    /** Aviso de gol del Madrid cuando no estás viendo el partido */
+    var notifyGoals: Boolean
+        get() = bool("notifyGoals", true)
+        set(v) = setBool("notifyGoals", v)
+
+    /** Recordatorios puestos con «Avísame» (JSON) */
+    var remindersJson: String
+        get() = str("reminders", "[]")
+        set(v) = put("reminders", v)
+
+    /** Última versión cuyas novedades ya se enseñaron */
+    var seenCode: Int
+        get() = sp.getInt("seenCode", 0)
+        set(v) = putInt("seenCode", v)
+
+    /** Pista de audio elegida por canal ("es", "en"…; vacío = la del canal) */
+    fun audioFor(channelId: Int): String = str("aud_$channelId")
+    fun setAudioFor(channelId: Int, lang: String) = put("aud_$channelId", lang)
+
+    /** Subtítulos por canal ("" = desactivados) */
+    fun subsFor(channelId: Int): String = str("sub_$channelId")
+    fun setSubsFor(channelId: Int, lang: String) = put("sub_$channelId", lang)
+
+    /** Color de acento del launcher */
+    var accent: String
+        get() = str("accent", "#F5B544")
+        set(v) = put("accent", v)
+
+    /** Cerrar apps de fondo al abrir un canal (más memoria para el vídeo) */
+    var autoFree: Boolean
+        get() = sp.getBoolean("autoFree", true)
+        set(v) {
+            sp.edit().putBoolean("autoFree", v).apply()
+        }
+
+    /** Última app abierta desde el launcher (tecla MENU en el inicio para volver) */
+    var lastApp: String
+        get() = strP("lastApp")
+        set(v) = putP("lastApp", v)
+
     val configured: Boolean
         get() = server.isNotBlank() && user.isNotBlank() && pass.isNotBlank()
 
@@ -229,7 +325,7 @@ class Prefs(ctx: Context) {
         set(v) = putP("hidden", v.joinToString(","))
 
     companion object {
-        private val SKIP = setOf("latestCode", "lastCheck", "askedCode", "profile")
+        private val SKIP = setOf("latestCode", "lastCheck", "askedCode", "profile", "seenCode")
         val DEFAULT_PINS = listOf(
             "com.teamsmart.videomanager.tv",
             "com.dazn",

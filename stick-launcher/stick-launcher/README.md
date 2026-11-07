@@ -49,6 +49,18 @@ Una sola vez, con el stick conectado por ADB (`tools/stick.bat` → opción 7):
 
     adb shell pm grant com.alvaro.launcher android.permission.WRITE_SECURE_SETTINGS
 
+### Permisos para avisos y PITWALL encima de DAZN
+
+Para que los avisos (partido del Madrid, goles) y PITWALL salgan encima de otras apps, Lumen necesita «Mostrar sobre otras apps». Si el stick no deja activarlo en Ajustes → Avisos, se da una vez por adb:
+
+    adb shell appops set com.alvaro.launcher SYSTEM_ALERT_WINDOW allow
+
+La tecla de «¡Vuelta!» dentro de DAZN usa un servicio de accesibilidad de Lumen (solo escucha esa tecla). Se activa en Ajustes → Fútbol y F1 → «Activar la tecla en Accesibilidad», o por adb:
+
+    adb shell settings put secure enabled_accessibility_services com.alvaro.launcher/.LumenKeys
+    adb shell settings put secure accessibility_enabled 1
+
+
 Después, Ajustes → "Sin anuncios (DNS AdGuard)" lo activa o desactiva.
 Bloquea anuncios y rastreadores a nivel de DNS; no puede quitar la publicidad que una app muestre dentro de sus propios vídeos.
 

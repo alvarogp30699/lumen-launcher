@@ -11,8 +11,14 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Avisos y PITWALL encima de otras apps (DAZN, SmartTube…) -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Solo se activa si lo concedes por ADB (ver README): permite el interruptor de DNS sin anuncios -->
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"
@@ -36,12 +42,13 @@
         android:banner="@drawable/ic_banner"
         android:icon="@drawable/ic_launcher"
         android:label="Lumen Launcher"
-        android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+        android:theme="@style/Lumen"
         android:usesCleartextTraffic="true">
 
         <!-- Pantalla de inicio: con la categoría HOME Android la usa al arrancar y con el botón Home -->
         <activity
             android:name=".MainActivity"
+            android:theme="@style/Lumen.Splash"
             android:exported="true"
             android:launchMode="singleTask"
             android:screenOrientation="landscape"
@@ -80,10 +87,70 @@
             android:exported="false"
             android:screenOrientation="landscape" />
         <activity
+            android:name=".FootballActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+        <activity
+            android:name=".SemanaActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+        <activity
+            android:name=".WhatsNewActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+        <activity
             android:name=".PlayerActivity"
+            android:theme="@style/Lumen.Player"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|uiMode"
             android:exported="false"
             android:screenOrientation="landscape" />
+
+        <!-- Salvapantallas de Lumen (se elige en Ajustes del sistema → Pantalla → Salvapantallas) -->
+        <service
+            android:name=".LumenDream"
+            android:exported="true"
+            android:label="Lumen"
+            android:permission="android.permission.BIND_DREAM_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.dreams.DreamService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
+
+        <!-- PITWALL sobre DAZN y vigilante de goles del Madrid -->
+        <service
+            android:name=".PitwallOverlay"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Panel de tiempos de F1 encima del vídeo" />
+        </service>
+        <service
+            android:name=".MatchWatch"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Aviso de goles del equipo favorito" />
+        </service>
+        <receiver
+            android:name=".ReminderReceiver"
+            android:exported="false" />
+
+        <!-- Tecla de «¡Vuelta!» dentro de DAZN (se activa en Accesibilidad) -->
+        <service
+            android:name=".LumenKeys"
+            android:exported="true"
+            android:label="Lumen Launcher · tecla ¡Vuelta!"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/lumen_keys" />
+        </service>
 
         <provider
             android:name="androidx.core.content.FileProvider"

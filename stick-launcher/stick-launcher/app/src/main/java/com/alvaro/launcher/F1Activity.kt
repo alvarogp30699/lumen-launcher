@@ -4,7 +4,6 @@ import android.app.Activity
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
@@ -41,7 +40,7 @@ class F1Activity : Activity() {
         detailTitle = TextView(this).apply {
             setTextColor(Colors.TEXT)
             setSizePx(ui, 40)
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = Fonts.bold
         }
         detailBody = TextView(this).apply {
             setTextColor(Colors.MUTED)
@@ -59,7 +58,7 @@ class F1Activity : Activity() {
             text = "Calendario de F1"
             setTextColor(Colors.TEXT)
             setSizePx(ui, 44)
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = Fonts.bold
             setPadding(0, 0, 0, ui.px(24))
         }
         val body = LinearLayout(this).apply {
@@ -69,7 +68,7 @@ class F1Activity : Activity() {
         }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Colors.BG)
+            background = homeBackground(ui)
             setPadding(ui.px(100), ui.px(56), ui.px(100), ui.px(48))
             addView(head)
             addView(body, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -131,7 +130,7 @@ class F1Activity : Activity() {
                 text = "R" + r.round + "  ·  " + r.name + "   (" + dateFmt.format(Date(first)) + ")"
                 setTextColor(if (past) Colors.MUTED else Colors.TEXT)
                 setSizePx(ui, 26)
-                typeface = Typeface.DEFAULT_BOLD
+                typeface = Fonts.bold
                 maxLines = 1
                 setPadding(ui.px(22), ui.px(16), ui.px(22), ui.px(16))
                 isFocusable = true

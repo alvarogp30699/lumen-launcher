@@ -172,6 +172,12 @@ class SetupServer(
         f["quality"]?.let { if (it in listOf("auto", "4k", "1080p")) prefs.quality = it }
         f["format"]?.let { if (it in listOf("m3u8", "ts")) prefs.format = it }
         f["sleep"]?.toIntOrNull()?.let { prefs.sleepMinutes = it }
+        f["accent"]?.let { a ->
+            if (Colors.ACCENTS.any { it.first == a }) {
+                prefs.accent = a
+                Colors.apply(a)
+            }
+        }
         // Se fuerza recargar la lista con los datos nuevos
         Xtream.channels = emptyList()
     }
@@ -230,6 +236,8 @@ $note
 <select name="quality">${opt("auto", prefs.quality, "Auto")}${opt("4k", prefs.quality, "4K")}${opt("1080p", prefs.quality, "Máximo 1080p")}</select>
 <label>Formato del canal <small>(si un canal no carga, prueba el otro)</small></label>
 <select name="format">${opt("m3u8", prefs.format, "m3u8 (HLS)")}${opt("ts", prefs.format, "ts")}</select>
+<label>Color de acento del launcher</label>
+<select name="accent">${Colors.ACCENTS.joinToString("") { opt(it.first, prefs.accent.uppercase(), it.second) }}</select>
 <label>Temporizador de reproducción</label>
 <select name="sleep">$sleepOptions</select>
 <label>PITWALL <small>(dirección de tu PC, p. ej. http://192.168.0.33:3100)</small></label>

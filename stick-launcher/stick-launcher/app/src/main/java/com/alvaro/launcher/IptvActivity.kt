@@ -1,12 +1,13 @@
 package com.alvaro.launcher
 
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.speech.RecognizerIntent
-import java.text.Normalizer
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -29,38 +30,58 @@ import java.util.Locale
 import kotlin.concurrent.thread
 
 /** Tarjeta de un canal en la parrilla. */
-private class ChannelCard(ctx: Context, ui: Ui) : LinearLayout(ctx) {
+private class ChannelCard(ctx: Context, private val ui: Ui) : LinearLayout(ctx) {
+    private val logoView = ImageView(ctx)
+    private val initials = TextView(ctx)
     private val numView = TextView(ctx)
     private val nameView = TextView(ctx)
     private val starView = TextView(ctx)
+    private val logoSize = ui.px(112)
 
     init {
         orientation = LinearLayout.VERTICAL
-        setPadding(ui.px(22), ui.px(18), ui.px(22), ui.px(18))
-        background = GradientDrawable().apply {
-            cornerRadius = ui.px(22).toFloat()
-            setColor(Colors.SURFACE)
+        setPadding(ui.px(20), ui.px(18), ui.px(20), ui.px(16))
+        background = roundRect(ui, Colors.SURFACE, 22)
+        layoutParams = AbsListView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.px(184))
+
+        initials.setTextColor(Colors.MUTED)
+        initials.setSizePx(ui, 28)
+        initials.typeface = Fonts.bold
+        initials.gravity = Gravity.CENTER
+        logoView.scaleType = ImageView.ScaleType.FIT_CENTER
+        val logoBox = FrameLayout(ctx).apply {
+            background = roundRect(ui, Colors.SURFACE2, 14)
+            setPadding(ui.px(8), ui.px(6), ui.px(8), ui.px(6))
+            addView(initials, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            addView(logoView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         }
-        layoutParams = AbsListView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.px(150))
 
         numView.setTextColor(Colors.ACCENT)
         numView.setSizePx(ui, 22)
-        numView.typeface = Typeface.DEFAULT_BOLD
+        numView.typeface = Fonts.bold
+        numView.gravity = Gravity.END
         starView.setTextColor(Colors.ACCENT)
         starView.setSizePx(ui, 26)
+        starView.gravity = Gravity.END
+        val side = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(numView)
+            addView(starView)
+        }
+
         nameView.setTextColor(Colors.TEXT)
-        nameView.setSizePx(ui, 28)
-        nameView.typeface = Typeface.DEFAULT_BOLD
+        nameView.setSizePx(ui, 26)
+        nameView.typeface = Fonts.bold
         nameView.maxLines = 2
         nameView.ellipsize = TextUtils.TruncateAt.END
 
         val top = LinearLayout(ctx)
         top.orientation = LinearLayout.HORIZONTAL
-        top.addView(numView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        top.addView(starView)
+        top.addView(logoBox, LinearLayout.LayoutParams(ui.px(132), ui.px(76)))
+        top.addView(View(ctx), LinearLayout.LayoutParams(0, 1, 1f))
+        top.addView(side)
         addView(top)
-        val spacer = View(ctx)
-        addView(spacer, LinearLayout.LayoutParams(1, 0, 1f))
+        addView(View(ctx), LinearLayout.LayoutParams(1, 0, 1f))
         addView(nameView)
     }
 
@@ -68,6 +89,8 @@ private class ChannelCard(ctx: Context, ui: Ui) : LinearLayout(ctx) {
         numView.text = ch.num.toString()
         nameView.text = ch.name
         starView.text = if (fav) "★" else ""
+        initials.text = ch.name.split(" ", "-", "|", ":").filter { it.isNotBlank() }.take(2).joinToString("") { it.take(1).uppercase() }
+        Logos.load(ch.icon, logoView, logoSize) { ok -> initials.visibility = if (ok) View.INVISIBLE else View.VISIBLE }
     }
 }
 
@@ -100,7 +123,10 @@ class IptvActivity : Activity() {
     private var visible: List<Channel> = emptyList()
     private var catId = ALL
     private var longHandled = false
+    @Volatile
     private var epgToken = 0
+    private val epgHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val epgPool = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val catRows = ArrayList<Pair<String, LinearLayout>>()
     private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 
@@ -111,6 +137,8 @@ class IptvActivity : Activity() {
     }
 
     override fun onDestroy() {
+        epgHandler.removeCallbacksAndMessages(null)
+        epgPool.shutdownNow()
         unlocked.clear()
         super.onDestroy()
     }
@@ -146,7 +174,7 @@ class IptvActivity : Activity() {
             text = "Aún no hay ninguna lista configurada"
             setTextColor(Colors.TEXT)
             setSizePx(ui, 44)
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = Fonts.bold
             gravity = Gravity.CENTER
         }
         val sub = TextView(this).apply {
@@ -162,7 +190,6 @@ class IptvActivity : Activity() {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setBackgroundColor(Colors.BG)
             addView(msg)
             addView(sub)
             addView(button)
@@ -177,7 +204,7 @@ class IptvActivity : Activity() {
             text = "Lumen IPTV"
             setTextColor(Colors.TEXT)
             setSizePx(ui, 34)
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = Fonts.bold
             setPadding(ui.px(12), 0, 0, ui.px(28))
         }
         catBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -249,7 +276,7 @@ class IptvActivity : Activity() {
         nowTitle = TextView(this).apply {
             setTextColor(Colors.TEXT)
             setSizePx(ui, 30)
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = Fonts.bold
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
@@ -295,7 +322,7 @@ class IptvActivity : Activity() {
 
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(Colors.BG)
+            background = homeBackground(ui)
             addView(left, LinearLayout.LayoutParams(ui.px(360), LinearLayout.LayoutParams.MATCH_PARENT))
             addView(right, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
         }
@@ -327,14 +354,32 @@ class IptvActivity : Activity() {
         val locked = prefs.lockedCats
         val counts = HashMap<String, Int>()
         for (c in Xtream.channels) if (c.id !in hiddenCh) counts[c.cat] = (counts[c.cat] ?: 0) + 1
-        addCatRow(FAV, "★ Favoritos", favs.size, false)
-        addCatRow(ALL, "Todos", visible.size, false)
+        addCatRow(FAV, "★   Favoritos", favs.size, false)
+        addCatRow(ALL, "▤   Todos", visible.size, false)
         val order = prefs.catOrder
         val cats = Xtream.categories.filter { it.id !in hiddenCat && (counts[it.id] ?: 0) > 0 }
         val sorted = cats.sortedBy { val i = order.indexOf(it.id); if (i < 0) Int.MAX_VALUE else i }
         for (cat in sorted) {
             val isLocked = cat.id in locked && cat.id !in unlocked
-            addCatRow(cat.id, (if (isLocked) "🔒 " else "") + cat.name, counts[cat.id] ?: 0, true)
+            addCatRow(cat.id, (if (isLocked) "🔒" else catIcon(cat.name)) + "   " + cat.name, counts[cat.id] ?: 0, true)
+        }
+    }
+
+    /** Icono según el nombre de la categoría (deportes, cine, noticias…). */
+    private fun catIcon(name: String): String {
+        val n = normText(name)
+        return when {
+            listOf("f1", "formula", "motor", "motogp", "racing").any { n.contains(it) } -> "🏁"
+            listOf("futbol", "football", "soccer", "laliga", "liga", "champions").any { n.contains(it) } -> "⚽"
+            listOf("deport", "sport", "dazn", "eurosport", "espn", "nba", "tenis", "golf").any { n.contains(it) } -> "🏆"
+            listOf("cine", "movie", "film", "pelicul").any { n.contains(it) } -> "🎬"
+            listOf("serie", "series").any { n.contains(it) } -> "📺"
+            listOf("noticia", "news", "informativ").any { n.contains(it) } -> "📰"
+            listOf("infantil", "kids", "niño", "nino", "cartoon", "dibujo").any { n.contains(it) } -> "🧸"
+            listOf("music", "musica").any { n.contains(it) } -> "🎵"
+            listOf("document", "discovery", "natura", "histor").any { n.contains(it) } -> "🌍"
+            listOf("4k", "uhd").any { n.contains(it) } -> "✨"
+            else -> "▸"
         }
     }
 
@@ -342,13 +387,16 @@ class IptvActivity : Activity() {
         val label = TextView(this).apply {
             text = name
             setSizePx(ui, 26)
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = Fonts.bold
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
         val n = TextView(this).apply {
             text = count.toString()
-            setSizePx(ui, 22)
+            setSizePx(ui, 20)
+            typeface = Fonts.bold
+            setPadding(ui.px(12), ui.px(2), ui.px(12), ui.px(2))
+            background = roundRect(ui, Colors.alpha(android.graphics.Color.WHITE, 0x14), 10)
         }
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -387,8 +435,8 @@ class IptvActivity : Activity() {
             }
             @Suppress("UNCHECKED_CAST")
             val views = row.tag as Pair<TextView, TextView>
-            views.first.setTextColor(if (selected) android.graphics.Color.parseColor("#1A1203") else Colors.TEXT)
-            views.second.setTextColor(if (selected) android.graphics.Color.parseColor("#3A2A06") else Colors.MUTED)
+            views.first.setTextColor(if (selected) Colors.onColor() else Colors.TEXT)
+            views.second.setTextColor(if (selected) Colors.onColor() else Colors.MUTED)
         }
     }
 
@@ -435,11 +483,8 @@ class IptvActivity : Activity() {
         search(text)
     }
 
-    private fun norm(s: String): String =
-        Normalizer.normalize(s.lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
-
     private fun search(q: String) {
-        val words = norm(q).split(" ").filter { it.isNotBlank() }
+        val words = normText(q).split(" ").filter { it.isNotBlank() }
         if (words.isEmpty() || visible.isEmpty()) return
         val found = visible.filter { c -> words.all { c.key.contains(it) } }
         catId = SEARCH
@@ -593,11 +638,16 @@ class IptvActivity : Activity() {
         nowTitle.text = ch.name
         nowTime.text = ""
         nextTitle.text = ""
-        thread {
-            Thread.sleep(250)
-            if (token != epgToken) return@thread
+        // al pasar rápido por la lista no se lanza nada: solo se pide la guía del canal donde te paras
+        epgHandler.removeCallbacksAndMessages(null)
+        epgHandler.postDelayed({ epgPool.execute { loadEpg(ch, token) } }, 250)
+    }
+
+    private fun loadEpg(ch: Channel, token: Int) {
+        run {
+            if (token != epgToken) return
             val list = Xtream.epg(prefs, ch.id)
-            if (token != epgToken) return@thread
+            if (token != epgToken) return
             val nowSec = System.currentTimeMillis() / 1000
             val now = list.firstOrNull { it.start <= nowSec && nowSec < it.end }
             val next = list.firstOrNull { it.start >= (now?.end ?: nowSec) }
