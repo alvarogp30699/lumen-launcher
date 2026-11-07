@@ -79,7 +79,7 @@ class Prefs(ctx: Context) {
 
     /** usuario/repositorio de GitHub donde se publican las versiones del launcher */
     var updateRepo: String
-        get() = str("repo")
+        get() = str("repo", "alvarogp30699/lumen-launcher")
         set(v) = put("repo", v.trim())
 
     /** auto | 4k | 1080p */
