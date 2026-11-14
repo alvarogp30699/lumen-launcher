@@ -276,8 +276,8 @@ fun makeTile(
         tile.addView(strip, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
         nameStrip = strip
     } else {
-        val iconSize = if (compact) 52 else 76
-        val pad = if (compact) 20 else 26
+        val iconSize = if (compact) 46 else 66
+        val pad = if (compact) 16 else 22
         val inner = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(ui.px(pad), ui.px(pad), ui.px(pad), ui.px(pad))
@@ -297,7 +297,8 @@ fun makeTile(
         inner.addView(TextView(ctx).apply {
             text = label
             setTextColor(Colors.TEXT)
-            setSizePx(ui, if (compact) 24 else 30)
+            setSizePx(ui, if (compact) 22 else 27)
+            includeFontPadding = false
             typeface = Fonts.bold
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END

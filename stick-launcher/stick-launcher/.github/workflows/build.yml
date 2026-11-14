@@ -1,0 +1,45 @@
+name: Compilar APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Compilar
+        run: gradle assembleDebug --no-daemon -PversionCode=${{ github.run_number }}
+
+      - name: Guardar el APK como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumen-launcher
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      # Cada versión es un release v1.N (N = versionCode). El enlace
+      # /releases/latest/download/lumen-launcher.apk siempre apunta a la última.
+      - name: Publicar release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk lumen-launcher.apk
+          gh release create "v1.${{ github.run_number }}" lumen-launcher.apk \
+            --title "Lumen Launcher v1.${{ github.run_number }}" \
+            --notes "APK listo para instalar en el stick." \
+            --target "${{ github.sha }}"

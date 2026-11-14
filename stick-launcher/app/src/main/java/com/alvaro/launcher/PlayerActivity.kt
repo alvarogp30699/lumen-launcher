@@ -546,8 +546,8 @@ class PlayerActivity : Activity() {
     private fun createPlayer() {
         // Búfer corto para directos: cambia de canal rápido y no gasta memoria de más
         val lc = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(8000, 130000, 1500, 3000)
-            .setTargetBufferBytes(100 * 1024 * 1024)
+            .setBufferDurationsMs(8000, if (prefs.lite) 40000 else 130000, 1500, 3000)
+            .setTargetBufferBytes((if (prefs.lite) 30 else 100) * 1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(false)
             .build()
         val rf = DefaultRenderersFactory(this).setEnableDecoderFallback(true)
@@ -947,11 +947,14 @@ class PlayerActivity : Activity() {
 
     // ───────────────────────── Pausa del directo ─────────────────────────
 
+    /** Cuánto se puede pausar el directo: 2 minutos, o 30 s en el modo ligero. */
+    private fun maxBehind(): Long = if (prefs.lite) 30_000L else 120_000L
+
     private val pauseTick = object : Runnable {
         override fun run() {
             if (!paused) return
             val behind = behindMs + (System.currentTimeMillis() - pausedAt)
-            pauseText.text = "−" + mmss(behind) + " del directo" + (if (behind > 120_000L) " · al seguir vuelves al directo" else "")
+            pauseText.text = "−" + mmss(behind) + " del directo" + (if (behind > maxBehind()) " · al seguir vuelves al directo" else "")
             handler.postDelayed(this, 1000)
         }
     }
@@ -975,7 +978,7 @@ class PlayerActivity : Activity() {
             val behind = behindMs + (System.currentTimeMillis() - pausedAt)
             paused = false
             pauseCard.visibility = View.GONE
-            if (behind > 120_000L) {
+            if (behind > maxBehind()) {
                 goLive()
             } else {
                 behindMs = behind

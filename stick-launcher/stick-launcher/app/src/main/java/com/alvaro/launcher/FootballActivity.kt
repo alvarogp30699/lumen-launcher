@@ -980,7 +980,7 @@ class FootballActivity : Activity() {
 
     /** Resumen: SmartTube con la búsqueda hecha (si no, YouTube en el navegador). */
     private fun openHighlights(q: String) {
-        val pkgs = listOf("com.teamsmart.videomanager.tv", "com.liskovsoft.smarttubetv.beta")
+        val pkgs = Prefs.SMARTTUBE_PKGS
         for (p in pkgs) {
             try {
                 startActivity(Intent(Intent.ACTION_SEARCH).setPackage(p).putExtra(android.app.SearchManager.QUERY, q))

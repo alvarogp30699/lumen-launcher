@@ -47,7 +47,9 @@ class MainActivity : Activity() {
     }
 
     private val defaultNames = mapOf(
+        "org.smarttube.stable" to "SmartTube",
         "com.teamsmart.videomanager.tv" to "SmartTube",
+        "org.smarttube.beta" to "SmartTube",
         "com.liskovsoft.smarttubetv.beta" to "SmartTube",
         "com.dazn" to "DAZN",
         "com.esaba.downloader" to "Downloader",
@@ -317,11 +319,11 @@ class MainActivity : Activity() {
     }
 
     private fun addTile(row: LinearLayout, tile: View) {
-        row.addView(tile, LinearLayout.LayoutParams(ui.px(260), ui.px(150)).apply { rightMargin = ui.px(28) })
+        row.addView(tile, LinearLayout.LayoutParams(ui.px(260), ui.px(172)).apply { rightMargin = ui.px(28) })
     }
 
     private fun addSmall(row: LinearLayout, tile: View) {
-        row.addView(tile, LinearLayout.LayoutParams(ui.px(250), ui.px(118)).apply { rightMargin = ui.px(24) })
+        row.addView(tile, LinearLayout.LayoutParams(ui.px(250), ui.px(130)).apply { rightMargin = ui.px(24) })
     }
 
     // ─────────────────────────────── avisos de estado ───────────────────────────────
@@ -1202,10 +1204,10 @@ class MainActivity : Activity() {
         true
     }
 
-    /** Si SmartTube estable no está pero sí la beta, se usa la beta. */
+    /** SmartTube ha cambiado de nombre de paquete: se usa el primero que esté instalado. */
     private fun resolve(pkg: String): String =
-        if (pkg == "com.teamsmart.videomanager.tv" && !isInstalled(pkg) && isInstalled("com.liskovsoft.smarttubetv.beta")) {
-            "com.liskovsoft.smarttubetv.beta"
+        if (pkg in Prefs.SMARTTUBE_PKGS && !isInstalled(pkg)) {
+            Prefs.SMARTTUBE_PKGS.firstOrNull { isInstalled(it) } ?: pkg
         } else {
             pkg
         }

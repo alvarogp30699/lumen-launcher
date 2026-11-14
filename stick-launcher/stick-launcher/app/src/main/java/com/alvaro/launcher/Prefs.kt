@@ -6,7 +6,27 @@ import org.json.JSONObject
 
 /** Ajustes guardados en el propio stick. No hay ninguna lista ni credencial incluida en la app. */
 class Prefs(ctx: Context) {
+    private val appCtx = ctx.applicationContext
     private val sp = ctx.getSharedPreferences("lumen", Context.MODE_PRIVATE)
+
+    /**
+     * Modo ligero para sticks con poca memoria (1 GB): sin PITWALL ni DAZN, sin sincronización por imagen
+     * y con la pausa del directo recortada. Si no se ha elegido nada, se activa solo por debajo de 1,2 GB.
+     */
+    var lite: Boolean
+        get() = if (sp.contains("lite")) sp.getBoolean("lite", false) else lowMemory()
+        set(v) {
+            sp.edit().putBoolean("lite", v).apply()
+        }
+
+    private fun lowMemory(): Boolean = try {
+        val am = appCtx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val mi = android.app.ActivityManager.MemoryInfo()
+        am.getMemoryInfo(mi)
+        mi.totalMem in 1..1_200_000_000L
+    } catch (e: Exception) {
+        false
+    }
 
     private fun str(k: String, d: String = ""): String = sp.getString(k, d) ?: d
     private fun put(k: String, v: String) {
@@ -118,7 +138,7 @@ class Prefs(ctx: Context) {
 
     /** Dirección de PITWALL en tu PC, p. ej. http://192.168.1.50:3000 (con ?token=... si usas contraseña) */
     var pitwallUrl: String
-        get() = str("pitwall")
+        get() = if (lite) "" else str("pitwall")
         set(v) = put("pitwall", v.trim())
 
     /** Retraso anti-spoiler (segundos) recordado por canal */
@@ -230,7 +250,7 @@ class Prefs(ctx: Context) {
     // ---- Sincronización ----
     /** Fútbol: leer el reloj del partido en la imagen y calcular el retraso solo */
     var syncAuto: Boolean
-        get() = bool("syncAuto", true)
+        get() = !lite && bool("syncAuto", true)
         set(v) = setBool("syncAuto", v)
 
     /** Fútbol: los goles no salen en el panel hasta que cambie el marcador de la tele */
@@ -317,7 +337,8 @@ class Prefs(ctx: Context) {
         set(v) = putP("favs", v.joinToString(","))
 
     var pinned: List<String>
-        get() = if (sp.contains(pk("pinned"))) strP("pinned").split(",").filter { it.isNotBlank() } else DEFAULT_PINS
+        get() = (if (sp.contains(pk("pinned"))) strP("pinned").split(",").filter { it.isNotBlank() } else DEFAULT_PINS)
+            .filter { !(lite && it == "com.dazn") }
         set(v) = putP("pinned", v.joinToString(","))
 
     var hidden: Set<String>
@@ -325,7 +346,14 @@ class Prefs(ctx: Context) {
         set(v) = putP("hidden", v.joinToString(","))
 
     companion object {
-        private val SKIP = setOf("latestCode", "lastCheck", "askedCode", "profile", "seenCode")
+        private val SKIP = setOf("latestCode", "lastCheck", "askedCode", "profile", "seenCode", "lite")
+        /** Nombres de paquete que ha usado SmartTube (estable y beta, antiguo y nuevo). */
+        val SMARTTUBE_PKGS = listOf(
+            "org.smarttube.stable",
+            "com.teamsmart.videomanager.tv",
+            "org.smarttube.beta",
+            "com.liskovsoft.smarttubetv.beta"
+        )
         val DEFAULT_PINS = listOf(
             "com.teamsmart.videomanager.tv",
             "com.dazn",

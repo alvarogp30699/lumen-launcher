@@ -18,9 +18,11 @@ class WhatsNewActivity : Activity() {
 
     /** Lo nuevo de esta versión: icono, color, título y una línea. */
     private val items = listOf(
-        listOf(R.drawable.ic_ball, "#2FB36B", "Goles sin destripes", "El panel del partido espera a que el marcador de tu tele cambie."),
-        listOf(R.drawable.ic_flag, "#E10600", "¡Vuelta! con el mando", "Mantén la tecla elegida dentro de DAZN para afinar el retraso de PITWALL."),
-        listOf(R.drawable.ic_pause, "#4C9AFF", "Pausa del directo", "Para hasta 2 minutos y vuelve al directo cuando quieras.")
+        listOf(R.drawable.ic_sliders, "#2FB36B", "Modo ligero", "Para sticks con poca memoria: quita PITWALL y DAZN y gasta menos búfer. Ajustes → Modo ligero."),
+        listOf(R.drawable.ic_grid, "#4C9AFF", "Lumen TV más claro", "Grupos de canales legibles y, al volver, te quedas en el grupo donde estabas."),
+        listOf(R.drawable.ic_mic, "#E10600", "Búsqueda por texto", "Busca canales escribiendo, además de por voz."),
+        listOf(R.drawable.ic_tv, "#F5A524", "Iconos y logos mejorados", "Mosaicos sin texto cortado, SmartTube reconocido y logos de canales que reintentan solos."),
+        listOf(R.drawable.ic_sync, "#9B6BFF", "Actualización automática", "Lumen avisa cuando hay versión nueva y la instala con un clic.")
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {

@@ -217,6 +217,11 @@ class SettingsActivity : Activity() {
                     Xtream.queue = emptyList()
                     refresh()
                 }
+                srow("Modo ligero (poca memoria)", "Quita PITWALL y DAZN, la sincronización por imagen y recorta la pausa del directo · para sticks de 1 GB", toggle(prefs.lite)) {
+                    prefs.lite = !prefs.lite
+                    Logos.clear()
+                    refresh()
+                }
                 val dns = dnsOn()
                 srow("Sin anuncios (DNS)", "Bloquea anuncios en todas las apps", toggle(dns)) { toggleDns(!dns) }
                 srow("Liberar memoria al ver canales", "Cierra las apps de fondo al abrir un canal", toggle(prefs.autoFree)) {
