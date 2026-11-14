@@ -215,7 +215,7 @@ class IptvActivity : Activity() {
         val left = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Colors.SURFACE)
-            setPadding(ui.px(32), ui.px(56), ui.px(32), ui.px(32))
+            setPadding(ui.px(24), ui.px(56), ui.px(24), ui.px(32))
             addView(title)
             addView(catScroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         }
@@ -227,7 +227,7 @@ class IptvActivity : Activity() {
             setSizePx(ui, 24)
         }
         val refresh = makeButton(this, ui, "Actualizar lista", false) { loadData(true) }
-        val voice = makeButton(this, ui, "🎤 Buscar", false) { startVoice() }
+        val voice = makeButton(this, ui, "🔎 Buscar", false) { askSearch() }
         val guide = makeButton(this, ui, "Guía", false) {
             Xtream.queue = current
             startActivity(Intent(this, GuideActivity::class.java))
@@ -323,7 +323,7 @@ class IptvActivity : Activity() {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             background = homeBackground(ui)
-            addView(left, LinearLayout.LayoutParams(ui.px(360), LinearLayout.LayoutParams.MATCH_PARENT))
+            addView(left, LinearLayout.LayoutParams(ui.px(470), LinearLayout.LayoutParams.MATCH_PARENT))
             addView(right, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
         }
     }
@@ -361,9 +361,13 @@ class IptvActivity : Activity() {
         val sorted = cats.sortedBy { val i = order.indexOf(it.id); if (i < 0) Int.MAX_VALUE else i }
         for (cat in sorted) {
             val isLocked = cat.id in locked && cat.id !in unlocked
-            addCatRow(cat.id, (if (isLocked) "🔒" else catIcon(cat.name)) + "   " + cat.name, counts[cat.id] ?: 0, true)
+            addCatRow(cat.id, (if (isLocked) "🔒" else catIcon(cat.name)) + "  " + shortName(cat.name), counts[cat.id] ?: 0, true)
         }
     }
+
+    /** Quita el prefijo de país («ES - », «ES| »…): sobra y ocupa sitio en la lista. */
+    private fun shortName(name: String): String =
+        name.replace(Regex("^\\s*(ES|ESP)\\s*[-|:]+\\s*", RegexOption.IGNORE_CASE), "").trim().ifEmpty { name }
 
     /** Icono según el nombre de la categoría (deportes, cine, noticias…). */
     private fun catIcon(name: String): String {
@@ -401,13 +405,18 @@ class IptvActivity : Activity() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(ui.px(20), ui.px(14), ui.px(20), ui.px(14))
+            setPadding(ui.px(16), ui.px(14), ui.px(16), ui.px(14))
             isFocusable = true
             isClickable = true
             tag = Pair(label, n)
             addView(label, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             addView(n)
-            setOnFocusChangeListener { _, hasFocus -> if (hasFocus) selectCategory(id) }
+            setOnFocusChangeListener { _, hasFocus ->
+                if (hasFocus) {
+                    // si ya es la categoría abierta no se recarga: así se conserva la posición en la parrilla
+                    if (id != catId) selectCategory(id) else styleCategories()
+                }
+            }
             setOnClickListener {
                 if (manage && id in prefs.lockedCats && id !in unlocked) {
                     askPinThen { unlocked.add(id); refreshVisible(); buildCategories(); selectCategory(id); catRows.firstOrNull { it.first == id }?.second?.requestFocus() }
@@ -460,6 +469,33 @@ class IptvActivity : Activity() {
             statusView.text = current.size.toString() + " canales"
         }
         showEpg(current.firstOrNull())
+    }
+
+    /** Búsqueda por texto (teclado en pantalla o físico); la voz es opcional si el stick la tiene. */
+    private fun askSearch() {
+        val box = android.widget.EditText(this).apply {
+            hint = "Nombre del canal (p. ej. liga, dazn, f1)"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+            setTextColor(Colors.TEXT)
+            setHintTextColor(Colors.MUTED)
+            setPadding(ui.px(32), ui.px(24), ui.px(32), ui.px(24))
+        }
+        val dlg = AlertDialog.Builder(this)
+            .setTitle("Buscar canal")
+            .setView(box)
+            .setPositiveButton("Buscar") { _, _ -> search(box.text.toString()) }
+            .setNeutralButton("🎤 Voz") { _, _ -> startVoice() }
+            .setNegativeButton("Cancelar", null)
+            .create()
+        box.setOnEditorActionListener { _, _, _ ->
+            dlg.dismiss()
+            search(box.text.toString())
+            true
+        }
+        dlg.show()
+        box.requestFocus()
     }
 
     private fun startVoice() {
@@ -611,6 +647,14 @@ class IptvActivity : Activity() {
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
         if (mainShown && grid.hasFocus()) {
             val k = e.keyCode
+            // ◀ en la primera columna: se vuelve a la categoría abierta, no a la primera de la lista
+            if (k == KeyEvent.KEYCODE_DPAD_LEFT && e.action == KeyEvent.ACTION_DOWN && grid.selectedItemPosition % 4 == 0) {
+                val row = catRows.firstOrNull { it.first == catId }?.second
+                if (row != null) {
+                    row.requestFocus()
+                    return true
+                }
+            }
             if (k == KeyEvent.KEYCODE_MENU && e.action == KeyEvent.ACTION_DOWN && e.repeatCount == 0) {
                 toggleFavorite()
                 return true
