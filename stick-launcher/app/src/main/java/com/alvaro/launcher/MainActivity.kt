@@ -47,7 +47,9 @@ class MainActivity : Activity() {
     }
 
     private val defaultNames = mapOf(
+        "org.smarttube.stable" to "SmartTube",
         "com.teamsmart.videomanager.tv" to "SmartTube",
+        "org.smarttube.beta" to "SmartTube",
         "com.liskovsoft.smarttubetv.beta" to "SmartTube",
         "com.dazn" to "DAZN",
         "com.esaba.downloader" to "Downloader",
@@ -1202,10 +1204,10 @@ class MainActivity : Activity() {
         true
     }
 
-    /** Si SmartTube estable no está pero sí la beta, se usa la beta. */
+    /** SmartTube ha cambiado de nombre de paquete: se usa el primero que esté instalado. */
     private fun resolve(pkg: String): String =
-        if (pkg == "com.teamsmart.videomanager.tv" && !isInstalled(pkg) && isInstalled("com.liskovsoft.smarttubetv.beta")) {
-            "com.liskovsoft.smarttubetv.beta"
+        if (pkg in Prefs.SMARTTUBE_PKGS && !isInstalled(pkg)) {
+            Prefs.SMARTTUBE_PKGS.firstOrNull { isInstalled(it) } ?: pkg
         } else {
             pkg
         }

@@ -326,6 +326,13 @@ class Prefs(ctx: Context) {
 
     companion object {
         private val SKIP = setOf("latestCode", "lastCheck", "askedCode", "profile", "seenCode")
+        /** Nombres de paquete que ha usado SmartTube (estable y beta, antiguo y nuevo). */
+        val SMARTTUBE_PKGS = listOf(
+            "org.smarttube.stable",
+            "com.teamsmart.videomanager.tv",
+            "org.smarttube.beta",
+            "com.liskovsoft.smarttubetv.beta"
+        )
         val DEFAULT_PINS = listOf(
             "com.teamsmart.videomanager.tv",
             "com.dazn",
